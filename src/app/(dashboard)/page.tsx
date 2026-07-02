@@ -26,6 +26,7 @@ const RESOURCES = [
   { key: "codex", label: "Codex", icon: Key, color: "text-rose-600" },
   { key: "registered", label: "Claude官Key", icon: ShieldCheck, color: "text-indigo-600" },
   { key: "openai", label: "OpenAI官Key", icon: UserPlus, color: "text-cyan-600" },
+  { key: "openaiPool", label: "OpenAI账号池", icon: User, color: "text-sky-600" },
 ]
 
 export default function OverviewPage() {

@@ -542,10 +542,55 @@ const CONFIGS: Record<string, ResourceConfig> = {
     pullFields: [],
     pullResultKey: "accounts",
   },
+  "openai-pool": {
+    importKey: "accounts",
+    importPlaceholder:
+      '粘贴 OpenAI 账号 JSON 数组\n[{"email": "xxx", "password": "xxx", "msRefreshToken": "xxx"}]',
+    columns: [
+      { key: "email", label: "邮箱" },
+      {
+        key: "msRefreshToken",
+        label: "RefreshToken",
+        render: (v: any) =>
+          v ? <span className="font-mono text-xs">{MASK(v)}</span> : "—",
+      },
+      {
+        key: "used",
+        label: "状态",
+        render: (v: any) =>
+          v ? (
+            <Badge variant="secondary">已用</Badge>
+          ) : (
+            <Badge variant="success">可用</Badge>
+          ),
+      },
+      {
+        key: "allocatedTo",
+        label: "分配",
+        render: (v: any) =>
+          v ? <Badge variant="warning">{v}</Badge> : "—",
+      },
+    ],
+    statCards: (s) => [
+      { label: "总计", value: s?.total ?? 0 },
+      { label: "可用", value: s?.available ?? 0 },
+      { label: "已分配", value: s?.allocated ?? 0 },
+    ],
+    pullFields: [
+      {
+        key: "count",
+        label: "数量",
+        type: "number" as const,
+        defaultValue: 1,
+        required: true,
+      },
+    ],
+    pullResultKey: "items",
+  },
 }
 
 const EXPORTABLE = new Set(["registered", "openai", "cards"])
-const TEXT_IMPORT_RESOURCES = new Set(["mailcom", "cards", "google", "proxies"])
+const TEXT_IMPORT_RESOURCES = new Set(["mailcom", "cards", "google", "proxies", "openai-pool"])
 const HAS_OPS_COL = new Set(["mailcom", "registered", "openai"])
 
 const INPUT_CLS =
@@ -807,6 +852,9 @@ export default function ResourcePage({ resource, title }: Props) {
       } else if (resource === "proxies") {
         url = "/api/proxies/text-import"
         body = { text: importText, pool: importPool, region: importRegion }
+      } else if (resource === "openai-pool") {
+        url = "/api/openai-pool/text-import"
+        body = { text: importText }
       }
 
       const res = await fetch(url, {
@@ -1489,7 +1537,9 @@ export default function ResourcePage({ resource, title }: Props) {
                         ? "每行一个（-- 分隔）:\n邮箱 -- 密码 -- 备用邮箱 -- 2FA密钥"
                         : resource === "proxies"
                           ? "每行一个: host:port:user:pass"
-                          : ""
+                          : resource === "openai-pool"
+                            ? "每行一个 (---- 分隔):\n邮箱----密码----msRefreshToken"
+                            : ""
                 }
                 rows={12}
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none"

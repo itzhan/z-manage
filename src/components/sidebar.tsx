@@ -14,6 +14,8 @@ import {
   ClipboardList,
   Settings,
   LogOut,
+  Server,
+  Database,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -26,6 +28,8 @@ const NAV = [
   { href: "/codex", label: "Codex", icon: Key },
   { href: "/registered", label: "Claude官Key", icon: ShieldCheck },
   { href: "/openai-keys", label: "OpenAI官Key", icon: UserPlus },
+  { href: "/workers", label: "Worker调度", icon: Server },
+  { href: "/openai-pool", label: "OpenAI账号池", icon: Database },
   { href: "/log", label: "分配记录", icon: ClipboardList },
   { href: "/settings", label: "设置", icon: Settings },
 ] as const

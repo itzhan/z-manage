@@ -204,6 +204,51 @@ function initTables(db: Database.Database) {
       createdAt TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_allocation_log_created ON allocation_log(createdAt);
+
+    CREATE TABLE IF NOT EXISTS workers (
+      id             TEXT PRIMARY KEY,
+      name           TEXT NOT NULL,
+      baseUrl        TEXT NOT NULL,
+      token          TEXT NOT NULL DEFAULT '',
+      status         TEXT DEFAULT 'offline',
+      maxTasks       INTEGER DEFAULT 5,
+      runningTasks   INTEGER DEFAULT 0,
+      capabilities   TEXT DEFAULT '["claude-platform-bindcard","platform-bindcard"]',
+      browserType    TEXT DEFAULT 'ads',
+      lastHeartbeat  TEXT,
+      systemInfo     TEXT,
+      createdAt      TEXT NOT NULL,
+      updatedAt      TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS dispatch_tasks (
+      id             TEXT PRIMARY KEY,
+      workerId       TEXT,
+      action         TEXT NOT NULL,
+      status         TEXT DEFAULT 'pending',
+      params         TEXT DEFAULT '{}',
+      resources      TEXT DEFAULT '{}',
+      result         TEXT,
+      log            TEXT DEFAULT '',
+      errorReason    TEXT,
+      createdAt      TEXT NOT NULL,
+      dispatchedAt   TEXT,
+      finishedAt     TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_dispatch_status ON dispatch_tasks(status);
+    CREATE INDEX IF NOT EXISTS idx_dispatch_worker ON dispatch_tasks(workerId);
+
+    CREATE TABLE IF NOT EXISTS openai_pool (
+      id             TEXT PRIMARY KEY,
+      email          TEXT NOT NULL UNIQUE,
+      password       TEXT,
+      msRefreshToken TEXT,
+      used           INTEGER DEFAULT 0,
+      allocatedTo    TEXT,
+      allocatedAt    TEXT,
+      addedAt        TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_openai_pool_allocated ON openai_pool(allocatedTo);
   `);
 }
 

@@ -46,5 +46,20 @@ export async function GET(req: NextRequest) {
       active: count('openai_keys', "status = 'active'"),
       unexported: count('openai_keys', "exported = 0 OR exported IS NULL"),
     },
+    workers: {
+      total: count('workers'),
+      online: count('workers', "status = 'online'"),
+    },
+    tasks: {
+      total: count('dispatch_tasks'),
+      running: count('dispatch_tasks', "status IN ('pending','dispatching','running')"),
+      success: count('dispatch_tasks', "status = 'success'"),
+      failed: count('dispatch_tasks', "status = 'failed'"),
+    },
+    openaiPool: {
+      total: count('openai_pool'),
+      available: count('openai_pool', "used = 0 AND allocatedTo IS NULL AND msRefreshToken IS NOT NULL"),
+      allocated: count('openai_pool', 'allocatedTo IS NOT NULL'),
+    },
   });
 }
