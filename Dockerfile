@@ -14,6 +14,6 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/src/mailcom-sdk ./src/mailcom-sdk
 VOLUME /app/data
-EXPOSE 3103
-ENV PORT=3103
+EXPOSE 3203
+ENV PORT=3203
 CMD ["node", "server.js"]

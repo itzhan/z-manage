@@ -2,11 +2,11 @@ services:
   z-manage:
     build: .
     ports:
-      - "3103:3103"
+      - "3203:3203"
     volumes:
       - ./data:/app/data
     environment:
-      - PORT=3103
+      - PORT=3203
       - API_KEY=ab123168
       - DB_PATH=/app/data/z-manage.sqlite
     restart: unless-stopped

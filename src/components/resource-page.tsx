@@ -24,6 +24,7 @@ import {
   KeyRound,
   Mail,
   FileDown,
+  Crosshair,
 } from "lucide-react"
 
 function getKey() {
@@ -613,6 +614,56 @@ export default function ResourcePage({ resource, title }: Props) {
   } | null>(null)
   const tokenPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // Hub bullet import
+  const [showHubImport, setShowHubImport] = useState(false)
+  const [hubUrl, setHubUrl] = useState("http://38.34.191.113:3104")
+  const [hubCount, setHubCount] = useState(30)
+  const [hubLoading, setHubLoading] = useState(false)
+  const [hubResult, setHubResult] = useState("")
+  const [hubPoolCount, setHubPoolCount] = useState<number | null>(null)
+
+  // Fetch hub pool count
+  const fetchHubPool = useCallback(async () => {
+    if (resource !== "registered") return
+    const url = hubUrl.replace(/\/+$/, "")
+    if (!url) return
+    try {
+      const r = await fetch(url + "/api/keys")
+      const d = await r.json()
+      if (d.success) setHubPoolCount(d.data.total)
+    } catch { /* ignore */ }
+  }, [resource, hubUrl])
+
+  useEffect(() => {
+    fetchHubPool()
+    if (resource !== "registered") return
+    const t = setInterval(fetchHubPool, 15000)
+    return () => clearInterval(t)
+  }, [fetchHubPool, resource])
+
+  const doHubImport = async () => {
+    setHubLoading(true)
+    setHubResult("")
+    try {
+      const resp = await fetch(`/api/registered/export-to-hub`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": getKey() },
+        body: JSON.stringify({ count: hubCount, hubUrl: hubUrl.replace(/\/+$/, "") }),
+      })
+      const d = await resp.json()
+      if (d.success) {
+        setHubResult(`已导入 ${d.exported} 个 key，中枢新增 ${d.hubAdded}，池中共 ${d.hubTotal}`)
+        setHubPoolCount(d.hubTotal)
+        load()
+      } else {
+        setHubResult(`失败: ${d.error}`)
+      }
+    } catch (e: unknown) {
+      setHubResult(`错误: ${e instanceof Error ? e.message : String(e)}`)
+    }
+    setHubLoading(false)
+  }
+
   // Init machineId from localStorage
   useEffect(() => {
     setMachineId(localStorage.getItem("z-machine-id") || "")
@@ -1024,6 +1075,19 @@ export default function ResourcePage({ resource, title }: Props) {
               <Download className="h-3.5 w-3.5 mr-1.5" />
               拉取
             </Button>
+          )}
+          {resource === "registered" && (
+            <>
+              {hubPoolCount !== null && (
+                <span className="text-xs text-muted-foreground border border-border rounded-md px-2 py-1">
+                  中枢子弹: <strong className="text-foreground">{hubPoolCount}</strong>
+                </span>
+              )}
+              <Button variant="outline" size="sm" onClick={() => { setShowHubImport(true); setHubResult(""); fetchHubPool(); }}>
+                <Crosshair className="h-3.5 w-3.5 mr-1.5" />
+                导入子弹
+              </Button>
+            </>
           )}
           {EXPORTABLE.has(resource) && (
             <>
@@ -1582,6 +1646,35 @@ export default function ResourcePage({ resource, title }: Props) {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+      {/* Hub Import Dialog */}
+      <Dialog open={showHubImport} onOpenChange={setShowHubImport}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>导入子弹到中枢</DialogTitle>
+            <DialogDescription>将未导出的 session_key 发送到渠道上号中枢的密钥池</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-2">
+              <Label className="text-xs">中枢地址</Label>
+              <Input value={hubUrl} onChange={(e) => setHubUrl(e.target.value)} placeholder="http://38.34.191.113:3104" />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs">导入数量</Label>
+              <Input type="number" min={1} value={hubCount} onChange={(e) => setHubCount(Math.max(1, Number(e.target.value) || 1))} />
+            </div>
+            {hubPoolCount !== null && (
+              <p className="text-xs text-muted-foreground">当前中枢密钥池: <strong className="text-foreground">{hubPoolCount}</strong> 个</p>
+            )}
+            {hubResult && (
+              <p className={`text-xs ${hubResult.startsWith("失败") || hubResult.startsWith("错误") ? "text-destructive" : "text-green-500"}`}>{hubResult}</p>
+            )}
+            <Button onClick={doHubImport} disabled={hubLoading} className="w-full">
+              <Crosshair className="h-3.5 w-3.5 mr-1.5" />
+              {hubLoading ? "导入中..." : `导入 ${hubCount} 个到中枢`}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
