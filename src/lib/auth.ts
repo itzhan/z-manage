@@ -13,7 +13,9 @@ export function loadApiKeys(): ApiKeyEntry[] {
   try {
     if (fs.existsSync(API_KEYS_PATH)) {
       const raw = fs.readFileSync(API_KEYS_PATH, 'utf-8');
-      return JSON.parse(raw) as ApiKeyEntry[];
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed.keys && Array.isArray(parsed.keys)) return parsed.keys;
     }
   } catch { /* fallback below */ }
 
@@ -27,7 +29,7 @@ export function loadApiKeys(): ApiKeyEntry[] {
 export function saveApiKeys(keys: ApiKeyEntry[]): void {
   const dir = path.dirname(API_KEYS_PATH);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(API_KEYS_PATH, JSON.stringify(keys, null, 2), 'utf-8');
+  fs.writeFileSync(API_KEYS_PATH, JSON.stringify({ keys }, null, 2), 'utf-8');
 }
 
 export function auth(req: NextRequest): { ok: boolean; keyName?: string; error?: NextResponse } {
