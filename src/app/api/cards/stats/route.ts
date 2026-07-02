@@ -5,12 +5,35 @@ import { auth } from '@/lib/auth';
 export async function GET(req: NextRequest) {
   const a = auth(req);
   if (!a.ok) return a.error!;
+
+  const sp = req.nextUrl.searchParams;
+  const platform = sp.get('platform') || '';
+  const brand = sp.get('brand') || '';
+
   const db = getDb();
   const total = (db.prepare('SELECT COUNT(*) as c FROM cards WHERE deleted = 0').get() as any).c;
   const active = (db.prepare("SELECT COUNT(*) as c FROM cards WHERE deleted = 0 AND status = 'active'").get() as any).c;
   const exhausted = (db.prepare("SELECT COUNT(*) as c FROM cards WHERE deleted = 0 AND status = 'exhausted'").get() as any).c;
   const disabled = (db.prepare("SELECT COUNT(*) as c FROM cards WHERE deleted = 0 AND status = 'disabled'").get() as any).c;
   const allocated = (db.prepare('SELECT COUNT(*) as c FROM cards WHERE deleted = 0 AND allocatedTo IS NOT NULL').get() as any).c;
+
+  const platformCol: Record<string, [string, string]> = {
+    claudePlatform: ['claudePlatformUsedCount', 'claudePlatformMaxUsage'],
+    openaiPlatform: ['openaiPlatformUsedCount', 'openaiPlatformMaxUsage'],
+    claude: ['claudeUsedCount', 'claudeMaxUsage'],
+    codex: ['codexUsedCount', 'codexMaxUsage'],
+  };
+
+  let available = active;
+  if (platform && platformCol[platform]) {
+    const [used, max] = platformCol[platform];
+    const conds = [`deleted = 0`, `status = 'active'`, `allocatedTo IS NULL`, `${used} < ${max}`];
+    const params: unknown[] = [];
+    if (brand) { conds.push('brand = ?'); params.push(brand); }
+    available = (db.prepare(`SELECT COUNT(*) as c FROM cards WHERE ${conds.join(' AND ')}`).get(...params) as any).c;
+  } else if (brand) {
+    available = (db.prepare("SELECT COUNT(*) as c FROM cards WHERE deleted = 0 AND status = 'active' AND allocatedTo IS NULL AND brand = ?").get(brand) as any).c;
+  }
 
   const brands = db.prepare(`
     SELECT brand, COUNT(*) as total,
@@ -25,5 +48,5 @@ export async function GET(req: NextRequest) {
 
   const paStats = db.prepare('SELECT COUNT(*) as total, COALESCE(SUM(balance), 0) as totalBalance FROM payment_accounts').get() as any;
 
-  return NextResponse.json({ total, active, exhausted, disabled, allocated, byBrand, paymentAccounts: paStats });
+  return NextResponse.json({ total, active, available, exhausted, disabled, allocated, byBrand, paymentAccounts: paStats });
 }

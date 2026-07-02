@@ -90,6 +90,10 @@ export default function WorkersPage() {
   const [dCount, setDCount] = useState(1)
   const [dAmount, setDAmount] = useState(5)
   const [dSpendLimit, setDSpendLimit] = useState(1000)
+  const [dBrand, setDBrand] = useState("")
+  const [brands, setBrands] = useState<string[]>([])
+  const [showPreview, setShowPreview] = useState(false)
+  const [preview, setPreview] = useState<any>(null)
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -97,10 +101,11 @@ export default function WorkersPage() {
 
   const load = useCallback(async () => {
     try {
-      const [statsRes, workersRes, tasksRes] = await Promise.all([
+      const [statsRes, workersRes, tasksRes, brandsRes] = await Promise.all([
         fetch("/api/stats", { headers: hdrs() }),
         fetch("/api/workers", { headers: hdrs() }),
         fetch(`/api/dispatch?pageSize=30&page=${tasksPage}${taskFilter ? `&status=${taskFilter}` : ""}`, { headers: hdrs() }),
+        fetch("/api/brands", { headers: hdrs() }),
       ])
       if (statsRes.ok) setStats(await statsRes.json())
       if (workersRes.ok) setWorkers(await workersRes.json())
@@ -108,6 +113,10 @@ export default function WorkersPage() {
         const d = await tasksRes.json()
         setTasks(d.tasks || [])
         setTasksTotal(d.total || 0)
+      }
+      if (brandsRes.ok) {
+        const b = await brandsRes.json()
+        setBrands(Array.isArray(b) ? b : b.brands || [])
       }
     } catch { /* ignore */ }
     setLoading(false)
@@ -140,9 +149,27 @@ export default function WorkersPage() {
     load()
   }
 
+  const loadPreview = async () => {
+    const platform = dAction === "claude-platform-bindcard" ? "claudePlatform" : "openaiPlatform"
+    const emailType = dAction === "claude-platform-bindcard" ? "mailcom" : "openaiPool"
+    try {
+      const [emailRes, cardRes, proxyRes] = await Promise.all([
+        fetch(`/api/${emailType === "mailcom" ? "mailcom" : "openai-pool"}/stats`, { headers: hdrs() }),
+        fetch(`/api/cards/stats?platform=${platform}${dBrand ? `&brand=${dBrand}` : ""}`, { headers: hdrs() }),
+        fetch("/api/proxies/stats", { headers: hdrs() }),
+      ])
+      const emailStats = emailRes.ok ? await emailRes.json() : {}
+      const cardStats = cardRes.ok ? await cardRes.json() : {}
+      const proxyStats = proxyRes.ok ? await proxyRes.json() : {}
+      setPreview({ email: emailStats, card: cardStats, proxy: proxyStats, emailType })
+    } catch { setPreview(null) }
+    setShowPreview(true)
+  }
+
   const dispatch = async () => {
     setDispatching(true)
     const params: any = { amount: dAmount }
+    if (dBrand) params.brand = dBrand
     if (dAction === "platform-bindcard") params.spendLimit = dSpendLimit
 
     await fetch("/api/dispatch/batch", {
@@ -155,6 +182,7 @@ export default function WorkersPage() {
       }),
     })
     setDispatching(false)
+    setShowPreview(false)
     load()
   }
 
@@ -252,8 +280,8 @@ export default function WorkersPage() {
       <div>
         <h3 className="text-sm font-medium mb-3">任务调度</h3>
         <Card>
-          <CardContent className="pt-4 pb-4">
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
+          <CardContent className="pt-4 pb-4 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 items-end">
               <div>
                 <Label className="text-xs mb-1 block">类型</Label>
                 <select value={dAction} onChange={e => setDAction(e.target.value)} className={SELECT_CLS}>
@@ -267,6 +295,17 @@ export default function WorkersPage() {
                   <option value="auto">自动分配</option>
                   {onlineWorkers.map((w: any) => (
                     <option key={w.id} value={w.id}>{w.name} ({w.runningTasks}/{w.maxTasks})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">卡品牌</Label>
+                <select value={dBrand} onChange={e => setDBrand(e.target.value)} className={SELECT_CLS}>
+                  <option value="">不限</option>
+                  {brands.map((b: any) => (
+                    <option key={typeof b === "string" ? b : b.brand} value={typeof b === "string" ? b : b.brand}>
+                      {typeof b === "string" ? b : b.brand}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -285,12 +324,59 @@ export default function WorkersPage() {
                 </div>
               )}
               <div>
-                <Button onClick={dispatch} disabled={dispatching || onlineWorkers.length === 0} className="w-full h-9">
-                  <Play className="h-3.5 w-3.5 mr-1" />
-                  {dispatching ? "调度中..." : "开始调度"}
+                <Button variant="outline" onClick={loadPreview} disabled={onlineWorkers.length === 0} className="w-full h-9">
+                  预览调度
                 </Button>
               </div>
             </div>
+
+            {/* Preview panel */}
+            {showPreview && preview && (() => {
+              const emailAvail = preview.email?.available ?? 0
+              const cardAvail = preview.card?.available ?? preview.card?.active ?? 0
+              const proxyAvail = preview.proxy?.available ?? 0
+              const maxDispatch = Math.min(emailAvail, cardAvail, proxyAvail)
+              const canDispatch = dCount <= maxDispatch && onlineWorkers.length > 0
+              const emailLabel = preview.emailType === "mailcom" ? "Mail.com 邮箱" : "OpenAI 账号"
+
+              return (
+                <div className="border rounded-md p-4 bg-muted/20 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">调度预览</p>
+                    <button onClick={() => setShowPreview(false)} className="text-muted-foreground hover:text-foreground">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="space-y-0.5">
+                      <p className="text-xs text-muted-foreground">{emailLabel}</p>
+                      <p className={`text-lg font-semibold tabular-nums ${emailAvail >= dCount ? "text-emerald-600" : "text-red-600"}`}>{emailAvail} 可用</p>
+                    </div>
+                    <div className="space-y-0.5">
+                      <p className="text-xs text-muted-foreground">卡片{dBrand ? ` (${dBrand})` : ""}</p>
+                      <p className={`text-lg font-semibold tabular-nums ${cardAvail >= dCount ? "text-emerald-600" : "text-red-600"}`}>{cardAvail} 可用</p>
+                    </div>
+                    <div className="space-y-0.5">
+                      <p className="text-xs text-muted-foreground">代理 IP</p>
+                      <p className={`text-lg font-semibold tabular-nums ${proxyAvail >= dCount ? "text-emerald-600" : "text-red-600"}`}>{proxyAvail} 可用</p>
+                    </div>
+                    <div className="space-y-0.5">
+                      <p className="text-xs text-muted-foreground">本次调度</p>
+                      <p className="text-lg font-semibold tabular-nums">{dCount} 个任务 → {dWorker === "auto" ? `${onlineWorkers.length} 个 Worker` : "1 个 Worker"}</p>
+                    </div>
+                  </div>
+                  {!canDispatch && (
+                    <p className="text-xs text-red-600">
+                      {onlineWorkers.length === 0 ? "没有在线的 Worker" : `资源不足: 最多可调度 ${maxDispatch} 个任务`}
+                    </p>
+                  )}
+                  <Button onClick={dispatch} disabled={dispatching || !canDispatch} className="h-9">
+                    <Play className="h-3.5 w-3.5 mr-1" />
+                    {dispatching ? "调度中..." : `确认调度 ${dCount} 个任务`}
+                  </Button>
+                </div>
+              )
+            })()}
           </CardContent>
         </Card>
       </div>
