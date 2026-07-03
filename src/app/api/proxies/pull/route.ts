@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     if (region) { query += ` AND region = ?`; params.push(region); }
     if (pool) { query += ` AND pool = ?`; params.push(pool); }
 
-    query += ` ORDER BY addedAt DESC LIMIT ?`;
+    query += ` ORDER BY RANDOM() LIMIT ?`;
     params.push(count);
 
     const rows = db.prepare(query).all(...params) as any[];
