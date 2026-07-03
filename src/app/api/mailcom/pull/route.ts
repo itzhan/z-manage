@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
     const rows = db.prepare(`
       SELECT * FROM mailcom_accounts
       WHERE banned = 0 AND allocatedTo IS NULL AND tokenStatus = 'ok'
+      ORDER BY addedAt DESC
       LIMIT ?
     `).all(count) as any[];
 

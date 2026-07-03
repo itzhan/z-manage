@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
 
       if (!preview) {
         for (const [cardId, inc] of Object.entries(cardUsageInc)) {
-          db.prepare(`UPDATE cards SET ${cols.used} = ${cols.used} + ? WHERE id = ?`).run(inc, cardId);
+          db.prepare(`UPDATE cards SET allocatedTo = ?, allocatedAt = ?, ${cols.used} = ${cols.used} + ? WHERE id = ?`).run(machineId, now, inc, cardId);
         }
       }
 
