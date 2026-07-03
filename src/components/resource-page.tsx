@@ -642,6 +642,8 @@ export default function ResourcePage({ resource, title }: Props) {
   const [loading, setLoading] = useState(true)
   const [exportedFilter, setExportedFilter] = useState<"" | "0" | "1">("")
   const [exportCount, setExportCount] = useState(30)
+  const [search, setSearch] = useState("")
+  const [statusFilter, setStatusFilter] = useState("")
 
   // Import
   const [showImport, setShowImport] = useState(false)
@@ -755,12 +757,11 @@ export default function ResourcePage({ resource, title }: Props) {
         page: String(page),
         limit: String(limit),
       })
-      if (
-        exportedFilter &&
-        (resource === "registered" || resource === "openai")
-      ) {
+      if (exportedFilter && (resource === "registered" || resource === "openai")) {
         params.set("exported", exportedFilter)
       }
+      if (statusFilter) params.set("status", statusFilter)
+      if (search) params.set("search", search)
       const [listRes, statsRes] = await Promise.all([
         fetch(`/api/${resource}?${params}`, {
           headers: { "X-API-Key": getKey() },
@@ -769,14 +770,14 @@ export default function ResourcePage({ resource, title }: Props) {
           headers: { "X-API-Key": getKey() },
         }).then((r) => r.json()),
       ])
-      setData(listRes.data || [])
+      setData(listRes.data || listRes.items || [])
       setTotal(listRes.total || 0)
       setStats(statsRes)
     } catch {
       /* ignore */
     }
     setLoading(false)
-  }, [resource, page, exportedFilter])
+  }, [resource, page, exportedFilter, statusFilter, search])
 
   useEffect(() => {
     load()
@@ -1114,6 +1115,27 @@ export default function ResourcePage({ resource, title }: Props) {
           </p>
         </div>
         <div className="flex gap-2 items-center flex-wrap justify-end">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+            placeholder="搜索..."
+            className="h-8 w-40 rounded-md border border-input bg-background px-2.5 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+          <select
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+          >
+            <option value="">全部状态</option>
+            <option value="available">可用</option>
+            <option value="used">已用</option>
+            <option value="allocated">已分配</option>
+            {resource === "cards" && <option value="active">active</option>}
+            {resource === "cards" && <option value="disabled">disabled</option>}
+            {resource === "cards" && <option value="exhausted">exhausted</option>}
+            {resource === "mailcom" && <option value="banned">被封</option>}
+          </select>
           {(resource === "registered" || resource === "openai") && (
             <select
               value={exportedFilter}
@@ -1123,7 +1145,7 @@ export default function ResourcePage({ resource, title }: Props) {
               }}
               className="h-8 rounded-md border border-input bg-background px-2 text-xs"
             >
-              <option value="">全部</option>
+              <option value="">导出状态</option>
               <option value="0">未导出</option>
               <option value="1">已导出</option>
             </select>

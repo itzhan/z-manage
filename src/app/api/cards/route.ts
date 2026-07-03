@@ -14,9 +14,11 @@ export async function GET(req: NextRequest) {
   const status = req.nextUrl.searchParams.get('status');
   const brand = req.nextUrl.searchParams.get('brand');
   const allocatedTo = req.nextUrl.searchParams.get('allocatedTo');
+  const search = req.nextUrl.searchParams.get('search');
   if (status) { conditions.push('c.status = ?'); params.push(status); }
   if (brand) { conditions.push('c.brand = ?'); params.push(brand); }
   if (allocatedTo) { conditions.push('c.allocatedTo = ?'); params.push(allocatedTo); }
+  if (search) { conditions.push("(c.cardNumber LIKE ? OR c.brand LIKE ? OR c.cardholder LIKE ?)"); params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
   const where = conditions.join(' AND ');
   const total = (db.prepare(`SELECT COUNT(*) as c FROM cards c WHERE ${where}`).get(...params) as any).c;
   const data = db.prepare(`SELECT c.*, pa.name as accountName, pa.balance as accountBalance FROM cards c LEFT JOIN payment_accounts pa ON c.accountId = pa.id WHERE ${where} ORDER BY c.addedAt DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);

@@ -11,13 +11,17 @@ export async function GET(req: NextRequest) {
   const page = Math.max(1, parseInt(sp.get('page') || '1'));
   const pageSize = Math.min(200, Math.max(1, parseInt(sp.get('pageSize') || '50')));
 
-  let where = '1=1';
-  if (status === 'available') where = 'used = 0';
-  else if (status === 'used') where = 'used = 1';
+  const search = sp.get('search') || '';
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (status === 'available') conditions.push('used = 0');
+  else if (status === 'used') conditions.push('used = 1');
+  if (search) { conditions.push("(address1 LIKE ? OR city LIKE ? OR zip LIKE ?)"); params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
+  const where = conditions.length ? conditions.join(' AND ') : '1=1';
 
   const db = getDb();
-  const total = (db.prepare(`SELECT COUNT(*) as c FROM addresses WHERE ${where}`).get() as any).c;
-  const items = db.prepare(`SELECT * FROM addresses WHERE ${where} ORDER BY id LIMIT ? OFFSET ?`).all(pageSize, (page - 1) * pageSize);
+  const total = (db.prepare(`SELECT COUNT(*) as c FROM addresses WHERE ${where}`).get(...params) as any).c;
+  const items = db.prepare(`SELECT * FROM addresses WHERE ${where} ORDER BY id LIMIT ? OFFSET ?`).all(...params, pageSize, (page - 1) * pageSize);
 
   return NextResponse.json({ items, total, page, pageSize });
 }

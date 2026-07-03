@@ -11,14 +11,18 @@ export async function GET(req: NextRequest) {
   const page = Math.max(1, parseInt(sp.get('page') || '1'));
   const pageSize = Math.min(200, Math.max(1, parseInt(sp.get('pageSize') || '50')));
 
-  let where = '1=1';
-  if (status === 'available') where = "used = 0 AND allocatedTo IS NULL";
-  else if (status === 'used') where = "used = 1";
-  else if (status === 'allocated') where = "allocatedTo IS NOT NULL";
+  const search = sp.get('search') || '';
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (status === 'available') conditions.push("used = 0 AND allocatedTo IS NULL");
+  else if (status === 'used') conditions.push("used = 1");
+  else if (status === 'allocated') conditions.push("allocatedTo IS NOT NULL");
+  if (search) { conditions.push("email LIKE ?"); params.push(`%${search}%`); }
+  const where = conditions.length ? conditions.join(' AND ') : '1=1';
 
   const db = getDb();
-  const total = (db.prepare(`SELECT COUNT(*) as c FROM openai_pool WHERE ${where}`).get() as any).c;
-  const items = db.prepare(`SELECT * FROM openai_pool WHERE ${where} ORDER BY addedAt DESC LIMIT ? OFFSET ?`).all(pageSize, (page - 1) * pageSize);
+  const total = (db.prepare(`SELECT COUNT(*) as c FROM openai_pool WHERE ${where}`).get(...params) as any).c;
+  const items = db.prepare(`SELECT * FROM openai_pool WHERE ${where} ORDER BY addedAt DESC LIMIT ? OFFSET ?`).all(...params, pageSize, (page - 1) * pageSize);
 
   return NextResponse.json({ items, total, page, pageSize });
 }
