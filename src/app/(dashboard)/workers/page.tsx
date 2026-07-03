@@ -172,21 +172,29 @@ export default function WorkersPage() {
   const loadPreview = async () => {
     const platform = dAction === "claude-platform-bindcard" ? "claudePlatform" : "openaiPlatform"
     const emailEndpoint = dAction === "claude-platform-bindcard" ? "mailcom" : "openai-pool"
+    const isClaude = dAction === "claude-platform-bindcard"
 
-    const [emailRes, cardRes, proxyRes] = await Promise.all([
+    const fetches: Promise<Response>[] = [
       fetch(`/api/${emailEndpoint}/pull`, { method: "POST", headers: hdrs(), body: JSON.stringify({ count: dCount, machineId: "preview", preview: true }) }),
       fetch("/api/cards/pull", { method: "POST", headers: hdrs(), body: JSON.stringify({ count: dCount, machineId: "preview", platform, brand: dBrand || undefined, preview: true }) }),
       fetch("/api/proxies/pull", { method: "POST", headers: hdrs(), body: JSON.stringify({ count: dCount, machineId: "preview", preview: true }) }),
-    ])
+    ]
+    if (isClaude) {
+      fetches.push(fetch("/api/addresses/stats", { headers: hdrs() }))
+    }
 
-    const emails = emailRes.ok ? await emailRes.json() : {}
-    const cards = cardRes.ok ? await cardRes.json() : {}
-    const proxies = proxyRes.ok ? await proxyRes.json() : {}
+    const results = await Promise.all(fetches)
+    const emails = results[0].ok ? await results[0].json() : {}
+    const cards = results[1].ok ? await results[1].json() : {}
+    const proxies = results[2].ok ? await results[2].json() : {}
+    const addrStats = isClaude && results[3]?.ok ? await results[3].json() : null
 
     setPreview({
       emails: emails.accounts || emails.items || [],
       cards: cards.cards || cards.items || [],
       proxies: proxies.proxies || proxies.items || [],
+      addressAvailable: addrStats?.available ?? null,
+      isClaude,
     })
     setShowPreview(true)
   }
@@ -353,8 +361,9 @@ export default function WorkersPage() {
 
             {/* Preview panel */}
             {showPreview && preview && (() => {
-              const { emails, cards, proxies } = preview
-              const minAvail = Math.min(emails.length, cards.length, proxies.length)
+              const { emails, cards, proxies, addressAvailable, isClaude } = preview
+              let minAvail = Math.min(emails.length, cards.length, proxies.length)
+              if (isClaude && addressAvailable !== null) minAvail = Math.min(minAvail, addressAvailable)
               const canDispatch = dCount <= minAvail && onlineWorkers.length > 0
 
               return (
@@ -392,6 +401,7 @@ export default function WorkersPage() {
                   <div className="px-4 py-3 flex items-center justify-between border-t">
                     <p className="text-xs text-muted-foreground">
                       {emails.length} 邮箱 · {cards.length} 卡 · {proxies.length} 代理
+                      {isClaude && addressAvailable !== null && <> · {addressAvailable} 地址</>}
                       {!canDispatch && <span className="text-red-500 ml-2">{onlineWorkers.length === 0 ? "无在线Worker" : "资源不足"}</span>}
                     </p>
                     <Button onClick={dispatch} disabled={dispatching || !canDispatch} size="sm">
