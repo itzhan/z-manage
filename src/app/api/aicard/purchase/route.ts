@@ -118,13 +118,12 @@ export async function POST(req: NextRequest) {
               return (c as any)[col] ?? null;
             });
             upsertCard.run(...vals);
-            imported++;
           }
         });
         dbTx();
 
-        logAllocation(db, 'cards', 'aicard-purchase', a.keyName || '未知', imported, { brand, amountPerCard, count: imported });
-        send({ type: 'done', created: imported, failed, brand, amountPerCard });
+        logAllocation(db, 'cards', 'aicard-purchase', a.keyName || '未知', cards.length, { brand, amountPerCard, count: cards.length });
+        send({ type: 'done', created: cards.length, failed, brand, amountPerCard });
       } catch (e: any) {
         send({ type: 'error', message: e.message });
       }
