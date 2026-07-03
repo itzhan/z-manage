@@ -76,26 +76,27 @@ export async function POST(req: NextRequest) {
         const upsertCard = db.prepare(`INSERT OR REPLACE INTO cards (${CARD_COLS.join(',')}) VALUES (${CARD_COLS.map(() => '?').join(',')})`);
         const upsertPa = db.prepare('INSERT OR REPLACE INTO payment_accounts (id,name,balance,currency,note,addedAt) VALUES (?,?,?,?,?,?)');
 
-        let imported = 0;
-        const tx = db.transaction(() => {
-          for (let i = 0; i < cardIds.length; i++) {
-            // reveal is done inside transaction synchronously after async reveal
-          }
-        });
-
-        // Reveal cards one by one (async, outside transaction)
+        // Reveal cards in parallel
         const cards: any[] = [];
-        for (let i = 0; i < cardIds.length; i++) {
-          const cid = cardIds[i];
-          const reveal = await aicardFetch('POST', `/v1/cards/${cid}/secure-reveal`, { reason: 'Batch purchase export' }, `reveal_${cid}_${Date.now()}`);
-          const d = reveal?.data;
-          if (d?.card_number) {
-            const exp = d.expiration_date || '';
-            const expiry = exp.slice(0, 2) + '/' + exp.slice(2);
-            cards.push({ id: cid, cardNumber: d.card_number, cvv: d.security_code, expiry });
-            send({ type: 'revealed', idx: i + 1, total: cardIds.length, cardNumber: d.card_number, cvv: d.security_code, expiry });
+        let revealDone = 0;
+        let revealIdx = 0;
+
+        const revealOne = async (): Promise<void> => {
+          while (revealIdx < cardIds.length) {
+            const i = revealIdx++;
+            const cid = cardIds[i];
+            const reveal = await aicardFetch('POST', `/v1/cards/${cid}/secure-reveal`, { reason: 'Batch purchase export' }, `reveal_${cid}_${Date.now()}`);
+            const d = reveal?.data;
+            if (d?.card_number) {
+              const exp = d.expiration_date || '';
+              const expiry = exp.slice(0, 2) + '/' + exp.slice(2);
+              cards.push({ id: cid, cardNumber: d.card_number, cvv: d.security_code, expiry });
+            }
+            revealDone++;
+            send({ type: 'revealed', idx: revealDone, total: cardIds.length, cardNumber: d?.card_number, cvv: d?.security_code });
           }
-        }
+        };
+        await Promise.all(Array.from({ length: Math.min(concurrency, cardIds.length) }, () => revealOne()));
 
         // Import to DB
         const dbTx = db.transaction(() => {
