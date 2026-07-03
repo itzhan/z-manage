@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
     for (const r of reports) {
       switch (r.result) {
         case 'used':
-          db.prepare('UPDATE mailcom_accounts SET allocatedTo = NULL, allocatedAt = NULL WHERE email = ?').run(r.email);
+          db.prepare("UPDATE mailcom_accounts SET tokenStatus = 'used', allocatedTo = NULL, allocatedAt = NULL WHERE email = ?").run(r.email);
           break;
         case 'banned':
           db.prepare('UPDATE mailcom_accounts SET banned = 1, mailBannedAt = ?, allocatedTo = NULL, allocatedAt = NULL WHERE email = ?')
