@@ -9,4 +9,6 @@ services:
       - PORT=3203
       - API_KEY=ab123168
       - DB_PATH=/app/data/z-manage.sqlite
+      - AICARD_API_KEY=ak_live_1bjad0qZmUrnsEmXY0csIL9HWdTu9qkC
+      - AICARD_CUSTOMER_ID=cus_e3cb4482c3d7139e41819997
     restart: unless-stopped
