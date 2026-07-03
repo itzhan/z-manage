@@ -93,24 +93,30 @@ const CONFIGS: Record<string, ResourceConfig> = {
           STATUS_BADGE[v] || <Badge variant="secondary">{v}</Badge>,
       },
       {
-        key: "claudeUsedCount",
-        label: "Claude",
-        render: (v, r) => (
-          <span className="tabular-nums">
-            {v}/{r.claudeMaxUsage}
+        key: "claudePlatformUsedCount",
+        label: "Claude官Key",
+        render: (v: any, r: any) => (
+          <span className={`tabular-nums ${(v ?? 0) >= (r.claudePlatformMaxUsage ?? 3) ? "text-red-500" : ""}`}>
+            {v ?? 0}/{r.claudePlatformMaxUsage ?? 3}
           </span>
         ),
       },
       {
-        key: "codexUsedCount",
-        label: "Codex",
-        render: (v, r) => (
-          <span className="tabular-nums">
-            {v}/{r.codexMaxUsage}
+        key: "openaiPlatformUsedCount",
+        label: "OpenAI官Key",
+        render: (v: any, r: any) => (
+          <span className={`tabular-nums ${(v ?? 0) >= (r.openaiPlatformMaxUsage ?? 5) ? "text-red-500" : ""}`}>
+            {v ?? 0}/{r.openaiPlatformMaxUsage ?? 5}
           </span>
         ),
       },
-      { key: "accountName", label: "账户" },
+      {
+        key: "accountName",
+        label: "账户",
+        render: (v: any, r: any) => (
+          <span>{v || "—"}{r.accountBalance != null ? <span className="text-muted-foreground ml-1">${r.accountBalance}</span> : ""}</span>
+        ),
+      },
       {
         key: "allocatedTo",
         label: "分配",
