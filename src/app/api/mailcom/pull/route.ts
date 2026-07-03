@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
 
   const now = new Date().toISOString();
 
-  const tx = db.transaction(() => {
+  const txFn = db.transaction(() => {
     const rows = db.prepare(`
       SELECT * FROM mailcom_accounts
       WHERE banned = 0 AND allocatedTo IS NULL AND tokenStatus = 'ok'
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     };
   });
 
-  const result = tx();
+  const result = txFn.exclusive();
   if (!preview && result.accounts.length > 0) {
     logAllocation(db, 'mailcom', 'pull', a.keyName || '未知', result.accounts.length, {
       emails: result.accounts.map((ac: any) => ac.email),

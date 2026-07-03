@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
 
   const now = new Date().toISOString();
 
-  const tx = db.transaction(() => {
+  const txFn = db.transaction(() => {
     let query = `
       SELECT c.* FROM cards c
       LEFT JOIN payment_accounts pa ON c.accountId = pa.id
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
     };
   });
 
-  const result = tx();
+  const result = txFn.exclusive();
   if (!preview && result.cards.length > 0) {
     logAllocation(db, 'cards', 'pull', a.keyName || '未知', result.cards.length, {
       brand: brand || '(all)', platform: platform || '(none)', count: result.cards.length,

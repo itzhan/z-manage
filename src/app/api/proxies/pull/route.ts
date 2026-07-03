@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
 
   const now = new Date().toISOString();
 
-  const tx = db.transaction(() => {
+  const txFn = db.transaction(() => {
     let query = `SELECT * FROM proxies WHERE bad = 0 AND deleted = 0 AND allocatedTo IS NULL`;
     const params: any[] = [];
 
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     };
   });
 
-  const result = tx();
+  const result = txFn.exclusive();
   if (!preview && result.proxies.length > 0) {
     logAllocation(db, 'proxies', 'pull', a.keyName || '未知', result.proxies.length, {
       pool: pool || '(all)',
