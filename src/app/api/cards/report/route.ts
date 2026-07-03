@@ -22,28 +22,33 @@ export async function POST(req: NextRequest) {
       const cols = PLATFORM_COLS[r.platform];
       if (!cols) continue;
 
+      const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(r.cardId) as any;
+      if (!card) continue;
+
       if (r.success) {
-        // 预占已在 pull 时完成，只需清除 allocatedTo + 重算 status
-        const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(r.cardId) as any;
-        if (!card) continue;
+        // 成功：usedCount 已在 pull 时 +1，现在扣余额 + 检查是否耗尽 + 释放分配
+        if (card.accountId && r.deductBalance) {
+          db.prepare('UPDATE payment_accounts SET balance = MAX(0, balance - ?) WHERE id = ?')
+            .run(r.deductBalance, card.accountId);
+        }
 
         let newStatus = card.status;
         if (card.status !== 'disabled') {
-          const allExhausted =
-            (card.claudeUsedCount + (r.platform === 'claude' ? 0 : 0)) >= card.claudeMaxUsage &&
-            (card.codexUsedCount + (r.platform === 'codex' ? 0 : 0)) >= card.codexMaxUsage;
-          newStatus = allExhausted ? 'exhausted' : 'active';
+          const usedAfter = (card[cols.used] ?? 0);
+          const maxVal = card[cols.max] ?? 1;
+          newStatus = usedAfter >= maxVal ? 'exhausted' : 'active';
         }
 
         db.prepare('UPDATE cards SET allocatedTo = NULL, allocatedAt = NULL, status = ? WHERE id = ?')
           .run(newStatus, r.cardId);
 
-        if (card.accountId && r.deductBalance) {
-          db.prepare('UPDATE payment_accounts SET balance = MAX(0, balance - ?) WHERE id = ?')
-            .run(r.deductBalance, card.accountId);
-        }
+      } else if (r.cardRejected) {
+        // 卡被拒：标记 disabled，不回退 usedCount
+        db.prepare('UPDATE cards SET allocatedTo = NULL, allocatedAt = NULL, status = ? WHERE id = ?')
+          .run('disabled', r.cardId);
+
       } else {
-        // 失败：回退预占的 usedCount，清除 allocatedTo
+        // 其他失败（超时、网络等）：回退 usedCount，释放卡供复用
         db.prepare(`UPDATE cards SET allocatedTo = NULL, allocatedAt = NULL, ${cols.used} = MAX(0, ${cols.used} - 1) WHERE id = ?`)
           .run(r.cardId);
       }
