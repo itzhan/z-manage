@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   const a = auth(req);
   if (!a.ok) return a.error!;
   const db = getDb();
-  const { count = 1, machineId, platform, brand, minBalance, preview } = await req.json();
+  const { count = 1, machineId, platform, brand, minBalance, preview, noAllocate } = await req.json();
   if (!machineId) return NextResponse.json({ error: 'machineId required' }, { status: 400 });
 
   const cols = platform ? PLATFORM_COLS[platform] : null;
@@ -39,12 +39,19 @@ export async function POST(req: NextRequest) {
     if (rows.length === 0) return { cards: [], paymentAccounts: [] };
 
     if (!preview) {
-      if (cols) {
-        const updateStmt = db.prepare(`UPDATE cards SET allocatedTo = ?, allocatedAt = ?, ${cols.used} = ${cols.used} + 1 WHERE id = ?`);
-        for (const row of rows) updateStmt.run(machineId, now, row.id);
+      if (noAllocate) {
+        if (cols) {
+          const updateStmt = db.prepare(`UPDATE cards SET ${cols.used} = ${cols.used} + 1 WHERE id = ?`);
+          for (const row of rows) updateStmt.run(row.id);
+        }
       } else {
-        const updateStmt = db.prepare(`UPDATE cards SET allocatedTo = ?, allocatedAt = ? WHERE id = ?`);
-        for (const row of rows) updateStmt.run(machineId, now, row.id);
+        if (cols) {
+          const updateStmt = db.prepare(`UPDATE cards SET allocatedTo = ?, allocatedAt = ?, ${cols.used} = ${cols.used} + 1 WHERE id = ?`);
+          for (const row of rows) updateStmt.run(machineId, now, row.id);
+        } else {
+          const updateStmt = db.prepare(`UPDATE cards SET allocatedTo = ?, allocatedAt = ? WHERE id = ?`);
+          for (const row of rows) updateStmt.run(machineId, now, row.id);
+        }
       }
     }
 

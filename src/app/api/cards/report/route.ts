@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
       if (!card) continue;
 
       if (r.success) {
-        // 成功：usedCount 已在 pull 时 +1，现在扣余额 + 检查是否耗尽 + 释放分配
+        // 成功：usedCount 已在 pull 时 +1，现在扣余额 + 检查是否耗尽
         if (card.accountId && r.deductBalance) {
           db.prepare('UPDATE payment_accounts SET balance = MAX(0, balance - ?) WHERE id = ?')
             .run(r.deductBalance, card.accountId);
@@ -43,12 +43,12 @@ export async function POST(req: NextRequest) {
           .run(newStatus, r.cardId);
 
       } else if (r.cardRejected) {
-        // 卡被拒：标记 disabled，不回退 usedCount
+        // 卡被拒/充值失败：标记 disabled
         db.prepare('UPDATE cards SET allocatedTo = NULL, allocatedAt = NULL, status = ? WHERE id = ?')
           .run('disabled', r.cardId);
 
       } else {
-        // 其他失败（超时、网络等）：回退 usedCount，释放卡供复用
+        // 其他失败（超时、网络等）：回退 usedCount
         db.prepare(`UPDATE cards SET allocatedTo = NULL, allocatedAt = NULL, ${cols.used} = MAX(0, ${cols.used} - 1) WHERE id = ?`)
           .run(r.cardId);
       }
