@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import { useState, useEffect, useCallback } from "react"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -21,6 +21,7 @@ import {
   Server,
   ChevronDown,
   ChevronUp,
+  Pencil,
 } from "lucide-react"
 
 function getKey() {
@@ -39,12 +40,14 @@ function timeAgo(iso: string) {
 
 function duration(start: string, end?: string) {
   if (!start) return "—"
-  const ms = ((end ? new Date(end).getTime() : Date.now()) - new Date(start).getTime())
+  const ms = (end ? new Date(end).getTime() : Date.now()) - new Date(start).getTime()
   const s = Math.floor(ms / 1000)
   if (s < 60) return `${s}s`
   if (s < 3600) return `${Math.floor(s / 60)}m${s % 60}s`
   return `${Math.floor(s / 3600)}h${Math.floor((s % 3600) / 60)}m`
 }
+
+const MASK = (s: string) => (s && s.length > 8 ? s.slice(0, 4) + "····" + s.slice(-4) : s || "—")
 
 const STATUS_MAP: Record<string, { variant: "default" | "success" | "destructive" | "warning" | "secondary" | "outline"; label: string }> = {
   pending: { variant: "secondary", label: "等待中" },
@@ -73,16 +76,24 @@ export default function WorkersPage() {
   const [expandedTask, setExpandedTask] = useState<string | null>(null)
   const [taskLog, setTaskLog] = useState("")
   const [loading, setLoading] = useState(true)
+  const [brands, setBrands] = useState<any[]>([])
 
   // Dialogs
   const [showAddWorker, setShowAddWorker] = useState(false)
   const [dispatching, setDispatching] = useState(false)
+  const [showPreview, setShowPreview] = useState(false)
+  const [preview, setPreview] = useState<any>(null)
 
   // Add worker form
   const [wName, setWName] = useState("")
   const [wUrl, setWUrl] = useState("")
   const [wToken, setWToken] = useState("")
   const [wMax, setWMax] = useState(5)
+
+  // Edit worker
+  const [editWorker, setEditWorker] = useState<any>(null)
+  const [ewName, setEwName] = useState("")
+  const [ewMax, setEwMax] = useState(5)
 
   // Dispatch form
   const [dAction, setDAction] = useState("claude-platform-bindcard")
@@ -91,11 +102,6 @@ export default function WorkersPage() {
   const [dAmount, setDAmount] = useState(5)
   const [dSpendLimit, setDSpendLimit] = useState(1000)
   const [dBrand, setDBrand] = useState("")
-  const [brands, setBrands] = useState<string[]>([])
-  const [showPreview, setShowPreview] = useState(false)
-  const [preview, setPreview] = useState<any>(null)
-
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const hdrs = () => ({ "X-API-Key": getKey(), "Content-Type": "application/json" })
 
@@ -124,13 +130,11 @@ export default function WorkersPage() {
 
   useEffect(() => { load() }, [load])
 
+  // Auto-refresh every 10s
   useEffect(() => {
-    const hasRunning = tasks.some((t: any) => ["pending", "dispatching", "running"].includes(t.status))
-    if (hasRunning) {
-      timerRef.current = setInterval(load, 5000)
-    }
-    return () => { if (timerRef.current) clearInterval(timerRef.current) }
-  }, [tasks, load])
+    const timer = setInterval(load, 10000)
+    return () => clearInterval(timer)
+  }, [load])
 
   const addWorker = async () => {
     if (!wName || !wUrl) return
@@ -144,25 +148,46 @@ export default function WorkersPage() {
   }
 
   const deleteWorker = async (id: string) => {
-    if (!confirm("确定删除此 Worker？关联的运行中任务将被取消。")) return
+    if (!confirm("确定删除此 Worker？")) return
     await fetch(`/api/workers/${id}`, { method: "DELETE", headers: hdrs() })
+    load()
+  }
+
+  const openEditWorker = (w: any) => {
+    setEditWorker(w)
+    setEwName(w.name)
+    setEwMax(w.maxTasks)
+  }
+
+  const saveEditWorker = async () => {
+    if (!editWorker) return
+    await fetch("/api/workers", {
+      method: "POST", headers: hdrs(),
+      body: JSON.stringify({ id: editWorker.id, name: ewName, baseUrl: editWorker.baseUrl, token: editWorker.token, maxTasks: ewMax }),
+    })
+    setEditWorker(null)
     load()
   }
 
   const loadPreview = async () => {
     const platform = dAction === "claude-platform-bindcard" ? "claudePlatform" : "openaiPlatform"
-    const emailType = dAction === "claude-platform-bindcard" ? "mailcom" : "openaiPool"
-    try {
-      const [emailRes, cardRes, proxyRes] = await Promise.all([
-        fetch(`/api/${emailType === "mailcom" ? "mailcom" : "openai-pool"}/stats`, { headers: hdrs() }),
-        fetch(`/api/cards/stats?platform=${platform}${dBrand ? `&brand=${dBrand}` : ""}`, { headers: hdrs() }),
-        fetch("/api/proxies/stats", { headers: hdrs() }),
-      ])
-      const emailStats = emailRes.ok ? await emailRes.json() : {}
-      const cardStats = cardRes.ok ? await cardRes.json() : {}
-      const proxyStats = proxyRes.ok ? await proxyRes.json() : {}
-      setPreview({ email: emailStats, card: cardStats, proxy: proxyStats, emailType })
-    } catch { setPreview(null) }
+    const emailEndpoint = dAction === "claude-platform-bindcard" ? "mailcom" : "openai-pool"
+
+    const [emailRes, cardRes, proxyRes] = await Promise.all([
+      fetch(`/api/${emailEndpoint}/pull`, { method: "POST", headers: hdrs(), body: JSON.stringify({ count: dCount, machineId: "preview", preview: true }) }),
+      fetch("/api/cards/pull", { method: "POST", headers: hdrs(), body: JSON.stringify({ count: dCount, machineId: "preview", platform, brand: dBrand || undefined, preview: true }) }),
+      fetch("/api/proxies/pull", { method: "POST", headers: hdrs(), body: JSON.stringify({ count: dCount, machineId: "preview", preview: true }) }),
+    ])
+
+    const emails = emailRes.ok ? await emailRes.json() : {}
+    const cards = cardRes.ok ? await cardRes.json() : {}
+    const proxies = proxyRes.ok ? await proxyRes.json() : {}
+
+    setPreview({
+      emails: emails.accounts || emails.items || [],
+      cards: cards.cards || cards.items || [],
+      proxies: proxies.proxies || proxies.items || [],
+    })
     setShowPreview(true)
   }
 
@@ -175,9 +200,7 @@ export default function WorkersPage() {
     await fetch("/api/dispatch/batch", {
       method: "POST", headers: hdrs(),
       body: JSON.stringify({
-        action: dAction,
-        count: dCount,
-        params,
+        action: dAction, count: dCount, params,
         workerIds: dWorker === "auto" ? undefined : [dWorker],
       }),
     })
@@ -196,10 +219,7 @@ export default function WorkersPage() {
     setExpandedTask(id)
     try {
       const res = await fetch(`/api/dispatch/${id}/log`, { headers: hdrs() })
-      if (res.ok) {
-        const d = await res.json()
-        setTaskLog(d.log || "(空)")
-      }
+      if (res.ok) setTaskLog((await res.json()).log || "(空)")
     } catch { setTaskLog("加载失败") }
   }
 
@@ -258,6 +278,9 @@ export default function WorkersPage() {
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Badge variant={w.status === "online" ? "success" : "secondary"}>{w.status}</Badge>
+                      <button onClick={() => openEditWorker(w)} className="text-muted-foreground hover:text-foreground transition-colors">
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
                       <button onClick={() => deleteWorker(w.id)} className="text-muted-foreground hover:text-destructive transition-colors">
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -265,9 +288,7 @@ export default function WorkersPage() {
                   </div>
                   <div className="text-xs text-muted-foreground space-y-0.5">
                     <p className="font-mono truncate">{w.baseUrl}</p>
-                    <p>任务: <span className="tabular-nums">{w.runningTasks}/{w.maxTasks}</span></p>
-                    <p>心跳: {timeAgo(w.lastHeartbeat)}</p>
-                    <p>浏览器: {w.browserType || "ads"}</p>
+                    <p>任务: <span className="tabular-nums">{w.runningTasks}/{w.maxTasks}</span> · 心跳: {timeAgo(w.lastHeartbeat)}</p>
                   </div>
                 </CardContent>
               </Card>
@@ -332,48 +353,52 @@ export default function WorkersPage() {
 
             {/* Preview panel */}
             {showPreview && preview && (() => {
-              const emailAvail = preview.email?.available ?? 0
-              const cardAvail = preview.card?.available ?? preview.card?.active ?? 0
-              const proxyAvail = preview.proxy?.available ?? 0
-              const maxDispatch = Math.min(emailAvail, cardAvail, proxyAvail)
-              const canDispatch = dCount <= maxDispatch && onlineWorkers.length > 0
-              const emailLabel = preview.emailType === "mailcom" ? "Mail.com 邮箱" : "OpenAI 账号"
+              const { emails, cards, proxies } = preview
+              const minAvail = Math.min(emails.length, cards.length, proxies.length)
+              const canDispatch = dCount <= minAvail && onlineWorkers.length > 0
 
               return (
-                <div className="border rounded-md p-4 bg-muted/20 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">调度预览</p>
+                <div className="border rounded-md bg-muted/20">
+                  <div className="flex items-center justify-between px-4 pt-3 pb-2">
+                    <p className="text-sm font-medium">调度预览 · {dCount} 个任务</p>
                     <button onClick={() => setShowPreview(false)} className="text-muted-foreground hover:text-foreground">
                       <X className="h-3.5 w-3.5" />
                     </button>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="space-y-0.5">
-                      <p className="text-xs text-muted-foreground">{emailLabel}</p>
-                      <p className={`text-lg font-semibold tabular-nums ${emailAvail >= dCount ? "text-emerald-600" : "text-red-600"}`}>{emailAvail} 可用</p>
-                    </div>
-                    <div className="space-y-0.5">
-                      <p className="text-xs text-muted-foreground">卡片{dBrand ? ` (${dBrand})` : ""}</p>
-                      <p className={`text-lg font-semibold tabular-nums ${cardAvail >= dCount ? "text-emerald-600" : "text-red-600"}`}>{cardAvail} 可用</p>
-                    </div>
-                    <div className="space-y-0.5">
-                      <p className="text-xs text-muted-foreground">代理 IP</p>
-                      <p className={`text-lg font-semibold tabular-nums ${proxyAvail >= dCount ? "text-emerald-600" : "text-red-600"}`}>{proxyAvail} 可用</p>
-                    </div>
-                    <div className="space-y-0.5">
-                      <p className="text-xs text-muted-foreground">本次调度</p>
-                      <p className="text-lg font-semibold tabular-nums">{dCount} 个任务 → {dWorker === "auto" ? `${onlineWorkers.length} 个 Worker` : "1 个 Worker"}</p>
-                    </div>
+                  <div className="max-h-60 overflow-y-auto px-4">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-muted/60">
+                        <tr className="border-b">
+                          <th className="text-left py-1.5 font-medium w-8">#</th>
+                          <th className="text-left py-1.5 font-medium">邮箱</th>
+                          <th className="text-left py-1.5 font-medium">卡品牌</th>
+                          <th className="text-left py-1.5 font-medium">卡号</th>
+                          <th className="text-left py-1.5 font-medium">代理IP</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Array.from({ length: dCount }).map((_, i) => (
+                          <tr key={i} className="border-b last:border-0">
+                            <td className="py-1.5 text-muted-foreground tabular-nums">{i + 1}</td>
+                            <td className="py-1.5">{emails[i]?.email || <span className="text-red-500">不足</span>}</td>
+                            <td className="py-1.5">{cards[i]?.brand || "—"}</td>
+                            <td className="py-1.5 font-mono">{cards[i]?.cardNumber ? MASK(cards[i].cardNumber) : <span className="text-red-500">不足</span>}</td>
+                            <td className="py-1.5 font-mono">{proxies[i] ? `${proxies[i].host}:${proxies[i].port}` : <span className="text-red-500">不足</span>}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                  {!canDispatch && (
-                    <p className="text-xs text-red-600">
-                      {onlineWorkers.length === 0 ? "没有在线的 Worker" : `资源不足: 最多可调度 ${maxDispatch} 个任务`}
+                  <div className="px-4 py-3 flex items-center justify-between border-t">
+                    <p className="text-xs text-muted-foreground">
+                      {emails.length} 邮箱 · {cards.length} 卡 · {proxies.length} 代理
+                      {!canDispatch && <span className="text-red-500 ml-2">{onlineWorkers.length === 0 ? "无在线Worker" : "资源不足"}</span>}
                     </p>
-                  )}
-                  <Button onClick={dispatch} disabled={dispatching || !canDispatch} className="h-9">
-                    <Play className="h-3.5 w-3.5 mr-1" />
-                    {dispatching ? "调度中..." : `确认调度 ${dCount} 个任务`}
-                  </Button>
+                    <Button onClick={dispatch} disabled={dispatching || !canDispatch} size="sm">
+                      <Play className="h-3.5 w-3.5 mr-1" />
+                      {dispatching ? "调度中..." : `确认调度 ${dCount} 个`}
+                    </Button>
+                  </div>
                 </div>
               )
             })()}
@@ -435,7 +460,7 @@ export default function WorkersPage() {
                       <td className="px-3 py-2 text-xs text-muted-foreground max-w-48 truncate">{t.errorReason || "—"}</td>
                       <td className="px-3 py-2">
                         <div className="flex gap-1">
-                          <button onClick={() => toggleLog(t.id)} className="text-muted-foreground hover:text-foreground transition-colors" title="查看日志">
+                          <button onClick={() => toggleLog(t.id)} className="text-muted-foreground hover:text-foreground transition-colors" title="日志">
                             {expandedTask === t.id ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                           </button>
                           {["pending", "dispatching", "running"].includes(t.status) && (
@@ -450,7 +475,6 @@ export default function WorkersPage() {
                 })}
               </tbody>
             </table>
-
             {expandedTask && (
               <div className="border-t bg-muted/10 p-3">
                 <pre className="text-xs font-mono whitespace-pre-wrap max-h-80 overflow-y-auto text-muted-foreground leading-relaxed">{taskLog}</pre>
@@ -458,7 +482,6 @@ export default function WorkersPage() {
             )}
           </div>
         )}
-
         {tasksTotal > 30 && (
           <div className="flex justify-center gap-2 mt-3">
             <Button variant="outline" size="sm" disabled={tasksPage <= 1} onClick={() => setTasksPage(p => p - 1)}>上一页</Button>
@@ -471,27 +494,25 @@ export default function WorkersPage() {
       {/* Add Worker Dialog */}
       <Dialog open={showAddWorker} onOpenChange={setShowAddWorker}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>添加 Worker</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>添加 Worker</DialogTitle></DialogHeader>
           <div className="space-y-3 pt-2">
-            <div>
-              <Label className="text-xs mb-1 block">名称</Label>
-              <Input value={wName} onChange={e => setWName(e.target.value)} placeholder="Linux Server #1" />
-            </div>
-            <div>
-              <Label className="text-xs mb-1 block">地址 (baseUrl)</Label>
-              <Input value={wUrl} onChange={e => setWUrl(e.target.value)} placeholder="http://1.2.3.4:8080" />
-            </div>
-            <div>
-              <Label className="text-xs mb-1 block">Token (可选)</Label>
-              <Input value={wToken} onChange={e => setWToken(e.target.value)} placeholder="Worker 认证 Token" />
-            </div>
-            <div>
-              <Label className="text-xs mb-1 block">最大并发任务</Label>
-              <Input type="number" min={1} max={50} value={wMax} onChange={e => setWMax(+e.target.value)} />
-            </div>
+            <div><Label className="text-xs mb-1 block">名称</Label><Input value={wName} onChange={e => setWName(e.target.value)} placeholder="Linux Server #1" /></div>
+            <div><Label className="text-xs mb-1 block">地址 (baseUrl)</Label><Input value={wUrl} onChange={e => setWUrl(e.target.value)} placeholder="http://1.2.3.4:8099" /></div>
+            <div><Label className="text-xs mb-1 block">Token</Label><Input value={wToken} onChange={e => setWToken(e.target.value)} placeholder="认证 Token" /></div>
+            <div><Label className="text-xs mb-1 block">最大并发</Label><Input type="number" min={1} max={50} value={wMax} onChange={e => setWMax(+e.target.value)} /></div>
             <Button onClick={addWorker} className="w-full" disabled={!wName || !wUrl}>添加</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Worker Dialog */}
+      <Dialog open={!!editWorker} onOpenChange={(open) => { if (!open) setEditWorker(null) }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>编辑 Worker</DialogTitle></DialogHeader>
+          <div className="space-y-3 pt-2">
+            <div><Label className="text-xs mb-1 block">名称</Label><Input value={ewName} onChange={e => setEwName(e.target.value)} /></div>
+            <div><Label className="text-xs mb-1 block">最大并发任务</Label><Input type="number" min={1} max={50} value={ewMax} onChange={e => setEwMax(+e.target.value)} /></div>
+            <Button onClick={saveEditWorker} className="w-full">保存</Button>
           </div>
         </DialogContent>
       </Dialog>

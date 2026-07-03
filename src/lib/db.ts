@@ -21,6 +21,7 @@ export function getDb(): Database.Database {
   migrateMailcomTokenColumns(db);
   migrateRegisteredExported(db);
   migrateOpenaiKeysSchema(db);
+  seedAddresses(db);
   return db;
 }
 
@@ -249,6 +250,16 @@ function initTables(db: Database.Database) {
       addedAt        TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_openai_pool_allocated ON openai_pool(allocatedTo);
+
+    CREATE TABLE IF NOT EXISTS addresses (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      address1 TEXT NOT NULL,
+      city     TEXT NOT NULL,
+      state    TEXT NOT NULL,
+      zip      TEXT NOT NULL,
+      used     INTEGER DEFAULT 0,
+      addedAt  TEXT NOT NULL
+    );
   `);
 }
 
@@ -271,6 +282,23 @@ function migrateOpenaiKeysSchema(db: Database.Database) {
       db.exec('CREATE INDEX IF NOT EXISTS idx_openai_source ON openai_keys(sourceKeyName)');
     }
   } catch { /* ignore */ }
+}
+
+function seedAddresses(db: Database.Database) {
+  const count = (db.prepare('SELECT COUNT(*) as c FROM addresses').get() as any).c;
+  if (count > 0) return;
+  const seedPath = path.resolve('data/seed-addresses.json');
+  if (!fs.existsSync(seedPath)) return;
+  try {
+    const items = JSON.parse(fs.readFileSync(seedPath, 'utf-8'));
+    const stmt = db.prepare('INSERT OR IGNORE INTO addresses (address1, city, state, zip, used, addedAt) VALUES (?, ?, ?, ?, ?, ?)');
+    const tx = db.transaction((rows: any[]) => {
+      for (const r of rows) {
+        stmt.run(r.address1, r.city, r.state, r.zip, 0, r.addedAt || new Date().toISOString());
+      }
+    });
+    tx(items);
+  } catch { /* ignore seed errors */ }
 }
 
 function migrateRegisteredExported(db: Database.Database) {

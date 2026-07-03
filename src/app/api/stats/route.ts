@@ -61,5 +61,9 @@ export async function GET(req: NextRequest) {
       available: count('openai_pool', "used = 0 AND allocatedTo IS NULL AND msRefreshToken IS NOT NULL"),
       allocated: count('openai_pool', 'allocatedTo IS NOT NULL'),
     },
+    addresses: {
+      total: count('addresses'),
+      available: count('addresses', 'used = 0'),
+    },
   });
 }

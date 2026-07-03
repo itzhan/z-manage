@@ -587,6 +587,33 @@ const CONFIGS: Record<string, ResourceConfig> = {
     ],
     pullResultKey: "items",
   },
+  addresses: {
+    importKey: "addresses",
+    importPlaceholder:
+      '粘贴地址 JSON 数组\n[{"address1": "...", "city": "...", "state": "OR", "zip": "97210"}]',
+    columns: [
+      { key: "address1", label: "地址" },
+      { key: "city", label: "城市" },
+      { key: "state", label: "州" },
+      { key: "zip", label: "邮编" },
+      {
+        key: "used",
+        label: "状态",
+        render: (v: any) =>
+          v ? (
+            <Badge variant="secondary">已用</Badge>
+          ) : (
+            <Badge variant="success">可用</Badge>
+          ),
+      },
+    ],
+    statCards: (s) => [
+      { label: "总计", value: s?.total ?? 0 },
+      { label: "可用", value: s?.available ?? 0 },
+    ],
+    pullFields: [],
+    pullResultKey: "address",
+  },
 }
 
 const EXPORTABLE = new Set(["registered", "openai", "cards"])
