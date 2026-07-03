@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
         send({ type: 'revealing', count: cardIds.length });
         const db = getDb();
         const now = new Date().toISOString();
-        const CARD_COLS = ["id","cardNumber","expiry","cvv","brand","usedCount","maxUsage","claudeUsedCount","codexUsedCount","claudeMaxUsage","codexMaxUsage","claudePlatformUsedCount","claudePlatformMaxUsage","openaiPlatformUsedCount","openaiPlatformMaxUsage","accounts","accountId","status","addedAt","cardholder","country","address1","city","state","zip","deleted","deletedAt"];
+        const CARD_COLS = ["id","cardNumber","expiry","cvv","brand","claudeUsedCount","codexUsedCount","claudeMaxUsage","codexMaxUsage","claudePlatformUsedCount","claudePlatformMaxUsage","openaiPlatformUsedCount","openaiPlatformMaxUsage","accountId","status","addedAt","cardholder","country","address1","city","state","zip","deleted","deletedAt"];
         const upsertCard = db.prepare(`INSERT OR REPLACE INTO cards (${CARD_COLS.join(',')}) VALUES (${CARD_COLS.map(() => '?').join(',')})`);
         const upsertPa = db.prepare('INSERT OR REPLACE INTO payment_accounts (id,name,balance,currency,note,addedAt) VALUES (?,?,?,?,?,?)');
 
