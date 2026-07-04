@@ -17,13 +17,18 @@ export async function POST(req: NextRequest) {
   const masterUrl = `${req.nextUrl.protocol}//${req.nextUrl.host}`;
   const apiKey = req.headers.get('x-api-key') || req.nextUrl.searchParams.get('_key') || '';
 
+  const cap = `%"${action}"%`;
+  const allWorkers = db.prepare(`SELECT * FROM workers WHERE status = 'online' AND capabilities LIKE ? ORDER BY runningTasks ASC`).all(cap) as any[];
+
+  // If specific workers requested, prioritize them but include all as fallback
   let workers: any[];
   if (workerIds && workerIds.length > 0) {
-    const placeholders = workerIds.map(() => '?').join(',');
-    workers = db.prepare(`SELECT * FROM workers WHERE id IN (${placeholders}) AND status = 'online'`).all(...workerIds) as any[];
+    const preferred = new Set(workerIds);
+    const selected = allWorkers.filter(w => preferred.has(w.id));
+    const rest = allWorkers.filter(w => !preferred.has(w.id));
+    workers = [...selected, ...rest];
   } else {
-    const cap = `%"${action}"%`;
-    workers = db.prepare(`SELECT * FROM workers WHERE status = 'online' AND runningTasks < maxTasks AND capabilities LIKE ? ORDER BY runningTasks ASC`).all(cap) as any[];
+    workers = allWorkers;
   }
 
   if (workers.length === 0) {
