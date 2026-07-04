@@ -22,6 +22,7 @@ export function getDb(): Database.Database {
   migrateRegisteredExported(db);
   migrateOpenaiKeysSchema(db);
   seedAddresses(db);
+
   return db;
 }
 
@@ -259,6 +260,11 @@ function initTables(db: Database.Database) {
       zip      TEXT NOT NULL,
       used     INTEGER DEFAULT 0,
       addedAt  TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS kv_settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
     );
   `);
 }

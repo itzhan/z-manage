@@ -54,13 +54,31 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   vals.push(id);
   db.prepare(`UPDATE dispatch_tasks SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
 
-  // Auto-mark mailcom account as banned if task failed due to ban
-  if (body.status === 'failed' && body.errorReason && /封禁|BANNED/i.test(body.errorReason)) {
+  // Auto-handle failed tasks based on error type
+  if (body.status === 'failed' && body.errorReason) {
     try {
       const resources = body.resources ? (typeof body.resources === 'string' ? JSON.parse(body.resources) : body.resources) : (task.resources ? JSON.parse(task.resources) : null);
-      const email = resources?.mailcomEmail;
-      if (email) {
-        db.prepare("UPDATE mailcom_accounts SET banned = 1, mailBannedAt = ? WHERE email = ?").run(now, email);
+
+      if (/封禁|BANNED/i.test(body.errorReason)) {
+        // Ban: mark mailcom account as banned
+        const email = resources?.mailcomEmail;
+        if (email) {
+          db.prepare("UPDATE mailcom_accounts SET banned = 1, mailBannedAt = ? WHERE email = ?").run(now, email);
+        }
+      } else if (/\[NETWORK_ERROR\]/.test(body.errorReason)) {
+        // Network error: release email, card and proxy (not their fault)
+        const email = resources?.mailcomEmail;
+        const cardId = resources?.cardId;
+        const proxyId = resources?.proxyId;
+        if (email) {
+          db.prepare("UPDATE mailcom_accounts SET allocatedTo = NULL, allocatedAt = NULL WHERE email = ?").run(email);
+        }
+        if (cardId) {
+          db.prepare("UPDATE cards SET allocatedTo = NULL, allocatedAt = NULL WHERE id = ?").run(cardId);
+        }
+        if (proxyId) {
+          db.prepare("UPDATE proxies SET allocatedTo = NULL, allocatedAt = NULL WHERE id = ?").run(proxyId);
+        }
       }
     } catch { /* ignore parse errors */ }
   }

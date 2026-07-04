@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef, Fragment } from "react"
+import { useState, useEffect, useCallback, Fragment } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -126,69 +126,45 @@ export default function WorkersPage() {
     }))
   }, [dAction, dWorker, dCount, dAmount, dSpendLimit, dBrand])
 
-  // Auto-push bullets
+  // Auto-push bullets (server-side)
   const [autoPush, setAutoPush] = useState(false)
   const [autoPushLog, setAutoPushLog] = useState("")
   const [hubUrl, setHubUrl] = useState("http://38.34.191.113:3104")
-  const [hubPoolCount, setHubPoolCount] = useState<number | null>(null)
-  const autoPushRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  useEffect(() => {
+  const fetchAutoPushStatus = useCallback(async () => {
     try {
-      const saved = localStorage.getItem("z-auto-push")
-      if (saved) {
-        const s = JSON.parse(saved)
-        if (s.hubUrl) setHubUrl(s.hubUrl)
+      const res = await fetch("/api/auto-push", { headers: hdrs() })
+      if (res.ok) {
+        const s = await res.json()
+        setAutoPush(s.enabled)
+        setHubUrl(s.hubUrl || "http://38.34.191.113:3104")
+        setAutoPushLog(s.log || "")
       }
     } catch { /* ignore */ }
   }, [])
 
-  useEffect(() => {
-    localStorage.setItem("z-auto-push", JSON.stringify({ hubUrl }))
-  }, [hubUrl])
+  useEffect(() => { fetchAutoPushStatus() }, [fetchAutoPushStatus])
 
+  // Poll status every 5s to show latest log
   useEffect(() => {
-    if (!autoPush) {
-      if (autoPushRef.current) { clearInterval(autoPushRef.current); autoPushRef.current = null }
-      return
-    }
-    const check = async () => {
-      try {
-        const h = { "X-API-Key": getKey() }
-        const statsRes = await fetch("/api/registered/stats", { headers: h })
-        if (!statsRes.ok) { setAutoPushLog("查询失败"); return }
-        const st = await statsRes.json()
-        const unexported = st.unexported ?? 0
-        if (unexported > 0) {
-          setAutoPushLog(`发现 ${unexported} 个未导出，推送中...`)
-          const pushRes = await fetch("/api/registered/export-to-hub", {
-            method: "POST",
-            headers: { ...h, "Content-Type": "application/json" },
-            body: JSON.stringify({ count: unexported, hubUrl: hubUrl.replace(/\/+$/, "") }),
-          })
-          const d = await pushRes.json()
-          if (d.success) {
-            setAutoPushLog(`已推送 ${d.exported} 个，中枢新增 ${d.hubAdded}，池中共 ${d.hubTotal}`)
-            setHubPoolCount(d.hubTotal)
-          } else {
-            setAutoPushLog(`推送失败: ${d.error}`)
-          }
-        } else {
-          setAutoPushLog("无未导出，等待中...")
-          try {
-            const poolRes = await fetch(hubUrl.replace(/\/+$/, "") + "/api/keys")
-            const pd = await poolRes.json()
-            if (pd.success) setHubPoolCount(pd.data.total)
-          } catch { /* ignore */ }
-        }
-      } catch (e: any) {
-        setAutoPushLog(`错误: ${e.message}`)
+    const t = setInterval(fetchAutoPushStatus, 5000)
+    return () => clearInterval(t)
+  }, [fetchAutoPushStatus])
+
+  const toggleAutoPush = async () => {
+    const newEnabled = !autoPush
+    try {
+      const res = await fetch("/api/auto-push", {
+        method: "POST", headers: hdrs(),
+        body: JSON.stringify({ enabled: newEnabled, hubUrl }),
+      })
+      if (res.ok) {
+        const s = await res.json()
+        setAutoPush(s.enabled)
+        setAutoPushLog(s.log || "")
       }
-    }
-    check()
-    autoPushRef.current = setInterval(check, 5000)
-    return () => { if (autoPushRef.current) clearInterval(autoPushRef.current) }
-  }, [autoPush, hubUrl])
+    } catch { /* ignore */ }
+  }
 
   const hdrs = () => ({ "X-API-Key": getKey(), "Content-Type": "application/json" })
 
@@ -543,15 +519,10 @@ export default function WorkersPage() {
                   disabled={autoPush}
                 />
               </div>
-              {hubPoolCount !== null && (
-                <span className="text-xs text-muted-foreground border border-border rounded-md px-2 py-1">
-                  中枢池: <strong className="text-foreground tabular-nums">{hubPoolCount}</strong>
-                </span>
-              )}
               <Button
                 size="sm"
                 variant={autoPush ? "destructive" : "default"}
-                onClick={() => setAutoPush(p => !p)}
+                onClick={toggleAutoPush}
               >
                 <Crosshair className={`h-3.5 w-3.5 mr-1.5 ${autoPush ? "animate-pulse" : ""}`} />
                 {autoPush ? "停止自动推送" : "开启自动推送"}
