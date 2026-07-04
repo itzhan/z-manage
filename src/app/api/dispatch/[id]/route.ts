@@ -54,6 +54,17 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   vals.push(id);
   db.prepare(`UPDATE dispatch_tasks SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
 
+  // Auto-mark mailcom account as banned if task failed due to ban
+  if (body.status === 'failed' && body.errorReason && /封禁|BANNED/i.test(body.errorReason)) {
+    try {
+      const resources = body.resources ? (typeof body.resources === 'string' ? JSON.parse(body.resources) : body.resources) : (task.resources ? JSON.parse(task.resources) : null);
+      const email = resources?.mailcomEmail;
+      if (email) {
+        db.prepare("UPDATE mailcom_accounts SET banned = 1, mailBannedAt = ? WHERE email = ?").run(now, email);
+      }
+    } catch { /* ignore parse errors */ }
+  }
+
   const updated = db.prepare('SELECT * FROM dispatch_tasks WHERE id = ?').get(id);
   return NextResponse.json(updated);
 }
