@@ -34,8 +34,28 @@ export async function POST(req: NextRequest) {
   let dispatched = 0;
   let failed = 0;
 
+  // Track running tasks in memory to respect maxTasks
+  const workerLoad = new Map<string, number>();
+  for (const w of workers) workerLoad.set(w.id, w.runningTasks ?? 0);
+
   for (let i = 0; i < count; i++) {
-    const worker = workers[i % workers.length];
+    // Pick worker with lowest load that hasn't hit max
+    const available = workers
+      .filter(w => (workerLoad.get(w.id) ?? 0) < w.maxTasks)
+      .sort((a, b) => (workerLoad.get(a.id) ?? 0) - (workerLoad.get(b.id) ?? 0));
+
+    if (available.length === 0) {
+      // All workers full, remaining tasks fail
+      for (let j = i; j < count; j++) {
+        const tid = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        db.prepare('INSERT INTO dispatch_tasks (id, action, status, params, errorReason, createdAt, finishedAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run(tid, action, 'failed', JSON.stringify(taskParams || {}), '所有 Worker 已满', now, now);
+        tasks.push(db.prepare('SELECT id, workerId, action, status, errorReason, createdAt FROM dispatch_tasks WHERE id = ?').get(tid));
+        failed++;
+      }
+      break;
+    }
+
+    const worker = available[0];
     const taskId = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
     db.prepare('INSERT INTO dispatch_tasks (id, workerId, action, status, params, createdAt) VALUES (?, ?, ?, ?, ?, ?)').run(taskId, worker.id, action, 'pending', JSON.stringify(taskParams || {}), now);
@@ -55,6 +75,7 @@ export async function POST(req: NextRequest) {
 
       db.prepare('UPDATE dispatch_tasks SET status = ?, dispatchedAt = ? WHERE id = ?').run('dispatching', new Date().toISOString(), taskId);
       db.prepare('UPDATE workers SET runningTasks = runningTasks + 1 WHERE id = ?').run(worker.id);
+      workerLoad.set(worker.id, (workerLoad.get(worker.id) ?? 0) + 1);
       dispatched++;
     } catch (e: any) {
       db.prepare('UPDATE dispatch_tasks SET status = ?, errorReason = ?, finishedAt = ? WHERE id = ?').run('failed', `Worker 连接失败: ${e.message}`, new Date().toISOString(), taskId);
