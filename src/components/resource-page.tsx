@@ -651,6 +651,7 @@ export default function ResourcePage({ resource, title }: Props) {
   const [exportCount, setExportCount] = useState(30)
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState("")
+  const [brandFilter, setBrandFilter] = useState("")
 
   // Import
   const [showImport, setShowImport] = useState(false)
@@ -826,6 +827,7 @@ export default function ResourcePage({ resource, title }: Props) {
         params.set("exported", exportedFilter)
       }
       if (statusFilter) params.set("status", statusFilter)
+      if (brandFilter) params.set("brand", brandFilter)
       if (search) params.set("search", search)
       const [listRes, statsRes] = await Promise.all([
         fetch(`/api/${resource}?${params}`, {
@@ -842,7 +844,7 @@ export default function ResourcePage({ resource, title }: Props) {
       /* ignore */
     }
     setLoading(false)
-  }, [resource, page, exportedFilter, statusFilter, search])
+  }, [resource, page, exportedFilter, statusFilter, brandFilter, search])
 
   useEffect(() => {
     load()
@@ -857,7 +859,7 @@ export default function ResourcePage({ resource, title }: Props) {
   // ---------- brands ----------
 
   useEffect(() => {
-    if (resource === "cards" && showImport) {
+    if (resource === "cards") {
       fetch("/api/brands", { headers: { "X-API-Key": getKey() } })
         .then((r) => (r.ok ? r.json() : { brands: [] }))
         .then((d) => setBrands(d.brands || []))
@@ -1201,6 +1203,18 @@ export default function ResourcePage({ resource, title }: Props) {
             {resource === "cards" && <option value="exhausted">exhausted</option>}
             {resource === "mailcom" && <option value="banned">被封</option>}
           </select>
+          {resource === "cards" && brands.length > 0 && (
+            <select
+              value={brandFilter}
+              onChange={(e) => { setBrandFilter(e.target.value); setPage(1) }}
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+            >
+              <option value="">全部品牌</option>
+              {brands.map((b) => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+          )}
           {(resource === "registered" || resource === "openai") && (
             <select
               value={exportedFilter}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef, Fragment } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -22,6 +22,7 @@ import {
   ChevronDown,
   ChevronUp,
   Pencil,
+  Crosshair,
 } from "lucide-react"
 
 function getKey() {
@@ -95,7 +96,7 @@ export default function WorkersPage() {
   const [ewName, setEwName] = useState("")
   const [ewMax, setEwMax] = useState(5)
 
-  // Dispatch form
+  // Dispatch form — restore from localStorage
   const [dAction, setDAction] = useState("claude-platform-bindcard")
   const [dWorker, setDWorker] = useState("auto")
   const [dCount, setDCount] = useState(1)
@@ -103,15 +104,102 @@ export default function WorkersPage() {
   const [dSpendLimit, setDSpendLimit] = useState(1000)
   const [dBrand, setDBrand] = useState("")
 
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("z-dispatch-form")
+      if (saved) {
+        const s = JSON.parse(saved)
+        if (s.action) setDAction(s.action)
+        if (s.worker) setDWorker(s.worker)
+        if (s.count) setDCount(s.count)
+        if (s.amount) setDAmount(s.amount)
+        if (s.spendLimit) setDSpendLimit(s.spendLimit)
+        if (s.brand) setDBrand(s.brand)
+      }
+    } catch { /* ignore */ }
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem("z-dispatch-form", JSON.stringify({
+      action: dAction, worker: dWorker, count: dCount,
+      amount: dAmount, spendLimit: dSpendLimit, brand: dBrand,
+    }))
+  }, [dAction, dWorker, dCount, dAmount, dSpendLimit, dBrand])
+
+  // Auto-push bullets
+  const [autoPush, setAutoPush] = useState(false)
+  const [autoPushLog, setAutoPushLog] = useState("")
+  const [hubUrl, setHubUrl] = useState("http://38.34.191.113:3104")
+  const [hubPoolCount, setHubPoolCount] = useState<number | null>(null)
+  const autoPushRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("z-auto-push")
+      if (saved) {
+        const s = JSON.parse(saved)
+        if (s.hubUrl) setHubUrl(s.hubUrl)
+      }
+    } catch { /* ignore */ }
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem("z-auto-push", JSON.stringify({ hubUrl }))
+  }, [hubUrl])
+
+  useEffect(() => {
+    if (!autoPush) {
+      if (autoPushRef.current) { clearInterval(autoPushRef.current); autoPushRef.current = null }
+      return
+    }
+    const check = async () => {
+      try {
+        const h = { "X-API-Key": getKey() }
+        const statsRes = await fetch("/api/registered/stats", { headers: h })
+        if (!statsRes.ok) { setAutoPushLog("查询失败"); return }
+        const st = await statsRes.json()
+        const unexported = st.unexported ?? 0
+        if (unexported > 0) {
+          setAutoPushLog(`发现 ${unexported} 个未导出，推送中...`)
+          const pushRes = await fetch("/api/registered/export-to-hub", {
+            method: "POST",
+            headers: { ...h, "Content-Type": "application/json" },
+            body: JSON.stringify({ count: unexported, hubUrl: hubUrl.replace(/\/+$/, "") }),
+          })
+          const d = await pushRes.json()
+          if (d.success) {
+            setAutoPushLog(`已推送 ${d.exported} 个，中枢新增 ${d.hubAdded}，池中共 ${d.hubTotal}`)
+            setHubPoolCount(d.hubTotal)
+          } else {
+            setAutoPushLog(`推送失败: ${d.error}`)
+          }
+        } else {
+          setAutoPushLog("无未导出，等待中...")
+          try {
+            const poolRes = await fetch(hubUrl.replace(/\/+$/, "") + "/api/keys")
+            const pd = await poolRes.json()
+            if (pd.success) setHubPoolCount(pd.data.total)
+          } catch { /* ignore */ }
+        }
+      } catch (e: any) {
+        setAutoPushLog(`错误: ${e.message}`)
+      }
+    }
+    check()
+    autoPushRef.current = setInterval(check, 5000)
+    return () => { if (autoPushRef.current) clearInterval(autoPushRef.current) }
+  }, [autoPush, hubUrl])
+
   const hdrs = () => ({ "X-API-Key": getKey(), "Content-Type": "application/json" })
 
   const load = useCallback(async () => {
     try {
+      const platform = dAction === "claude-platform-bindcard" ? "claudePlatform" : "openaiPlatform"
       const [statsRes, workersRes, tasksRes, brandsRes] = await Promise.all([
         fetch("/api/stats", { headers: hdrs() }),
         fetch("/api/workers", { headers: hdrs() }),
         fetch(`/api/dispatch?pageSize=30&page=${tasksPage}${taskFilter ? `&status=${taskFilter}` : ""}`, { headers: hdrs() }),
-        fetch("/api/brands", { headers: hdrs() }),
+        fetch(`/api/brands?platform=${platform}&minBalance=${dAmount}`, { headers: hdrs() }),
       ])
       if (statsRes.ok) setStats(await statsRes.json())
       if (workersRes.ok) setWorkers(await workersRes.json())
@@ -122,11 +210,11 @@ export default function WorkersPage() {
       }
       if (brandsRes.ok) {
         const b = await brandsRes.json()
-        setBrands(Array.isArray(b) ? b : b.brands || [])
+        setBrands(b.details || [])
       }
     } catch { /* ignore */ }
     setLoading(false)
-  }, [tasksPage, taskFilter])
+  }, [tasksPage, taskFilter, dAction, dAmount])
 
   useEffect(() => { load() }, [load])
 
@@ -332,8 +420,8 @@ export default function WorkersPage() {
                 <select value={dBrand} onChange={e => setDBrand(e.target.value)} className={SELECT_CLS}>
                   <option value="">不限</option>
                   {brands.map((b: any) => (
-                    <option key={typeof b === "string" ? b : b.brand} value={typeof b === "string" ? b : b.brand}>
-                      {typeof b === "string" ? b : b.brand}
+                    <option key={b.brand} value={b.brand}>
+                      {b.brand} ({b.available}可用)
                     </option>
                   ))}
                 </select>
@@ -358,6 +446,30 @@ export default function WorkersPage() {
                 </Button>
               </div>
             </div>
+
+            {/* Estimate */}
+            {stats && (() => {
+              const isClaude = dAction === "claude-platform-bindcard"
+              const emailAvail = isClaude ? (stats.mailcom?.available ?? 0) : (stats.openaiPool?.available ?? 0)
+              const selectedBrand = brands.find((b: any) => b.brand === dBrand)
+              const cardAvail = dBrand
+                ? (selectedBrand?.available ?? 0)
+                : brands.reduce((s: number, b: any) => s + (b.available ?? 0), 0)
+              const proxyAvail = stats.proxies?.available ?? 0
+              const parts = [emailAvail, cardAvail, proxyAvail]
+              if (isClaude) parts.push(stats.addresses?.available ?? 0)
+              const maxCanDo = Math.min(...parts)
+              return (
+                <div className="flex items-center gap-4 text-xs text-muted-foreground border-t pt-3">
+                  <span>可调度估算: <strong className="text-foreground tabular-nums">{maxCanDo}</strong></span>
+                  <span className="text-muted-foreground/60">|</span>
+                  <span>邮箱 <strong className="tabular-nums">{emailAvail}</strong></span>
+                  <span>卡 <strong className="tabular-nums">{cardAvail}</strong>{dBrand && <span className="text-muted-foreground/60"> ({dBrand})</span>}</span>
+                  <span>代理 <strong className="tabular-nums">{proxyAvail}</strong></span>
+                  {isClaude && <span>地址 <strong className="tabular-nums">{stats.addresses?.available ?? 0}</strong></span>}
+                </div>
+              )
+            })()}
 
             {/* Preview panel */}
             {showPreview && preview && (() => {
@@ -416,6 +528,44 @@ export default function WorkersPage() {
         </Card>
       </div>
 
+      {/* Auto-push bullets */}
+      <div>
+        <h3 className="text-sm font-medium mb-3">自动录入子弹</h3>
+        <Card>
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2 min-w-0">
+                <Label className="text-xs whitespace-nowrap">中枢地址</Label>
+                <input
+                  value={hubUrl}
+                  onChange={e => setHubUrl(e.target.value)}
+                  className="h-8 w-56 rounded-md border border-input bg-background px-2.5 text-xs font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  disabled={autoPush}
+                />
+              </div>
+              {hubPoolCount !== null && (
+                <span className="text-xs text-muted-foreground border border-border rounded-md px-2 py-1">
+                  中枢池: <strong className="text-foreground tabular-nums">{hubPoolCount}</strong>
+                </span>
+              )}
+              <Button
+                size="sm"
+                variant={autoPush ? "destructive" : "default"}
+                onClick={() => setAutoPush(p => !p)}
+              >
+                <Crosshair className={`h-3.5 w-3.5 mr-1.5 ${autoPush ? "animate-pulse" : ""}`} />
+                {autoPush ? "停止自动推送" : "开启自动推送"}
+              </Button>
+              {autoPushLog && (
+                <span className={`text-xs ${autoPushLog.includes("失败") || autoPushLog.includes("错误") ? "text-destructive" : "text-muted-foreground"}`}>
+                  {autoPushLog}
+                </span>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Tasks */}
       <div>
         <div className="flex items-center justify-between mb-3">
@@ -460,43 +610,51 @@ export default function WorkersPage() {
                 {tasks.map((t: any) => {
                   const s = STATUS_MAP[t.status] || { variant: "secondary" as const, label: t.status }
                   const wk = workers.find((w: any) => w.id === t.workerId)
+                  const isExpanded = expandedTask === t.id
                   return (
-                    <tr key={t.id} className="border-b last:border-0 hover:bg-muted/20">
-                      <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{t.id?.slice(-8)}</td>
-                      <td className="px-3 py-2 text-xs">{wk?.name || t.workerId || "—"}</td>
-                      <td className="px-3 py-2 text-xs">{ACTION_LABEL[t.action] || t.action}</td>
-                      <td className="px-3 py-2"><Badge variant={s.variant}>{s.label}</Badge></td>
-                      <td className="px-3 py-2 text-xs tabular-nums">{duration(t.createdAt, t.finishedAt)}</td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground max-w-48 truncate">{t.errorReason || "—"}</td>
-                      <td className="px-3 py-2">
-                        <div className="flex gap-1">
-                          <button onClick={() => toggleLog(t.id)} className="text-muted-foreground hover:text-foreground transition-colors" title="日志">
-                            {expandedTask === t.id ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                          </button>
-                          {["pending", "dispatching", "running"].includes(t.status) && (
-                            <button onClick={() => cancelTask(t.id)} className="text-muted-foreground hover:text-destructive transition-colors" title="取消">
-                              <X className="h-3.5 w-3.5" />
+                    <Fragment key={t.id}>
+                      <tr className="border-b last:border-0 hover:bg-muted/20">
+                        <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{t.id?.slice(-8)}</td>
+                        <td className="px-3 py-2 text-xs">{wk?.name || t.workerId || "—"}</td>
+                        <td className="px-3 py-2 text-xs">{ACTION_LABEL[t.action] || t.action}</td>
+                        <td className="px-3 py-2"><Badge variant={s.variant}>{s.label}</Badge></td>
+                        <td className="px-3 py-2 text-xs tabular-nums">{duration(t.createdAt, t.finishedAt)}</td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground max-w-48 truncate">{t.errorReason || "—"}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex gap-1">
+                            <button onClick={() => toggleLog(t.id)} className="text-muted-foreground hover:text-foreground transition-colors" title="日志">
+                              {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
+                            {["pending", "dispatching", "running"].includes(t.status) && (
+                              <button onClick={() => cancelTask(t.id)} className="text-muted-foreground hover:text-destructive transition-colors" title="取消">
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr>
+                          <td colSpan={7} className="bg-muted/10 p-3 border-b">
+                            <pre className="text-xs font-mono whitespace-pre-wrap max-h-80 overflow-y-auto text-muted-foreground leading-relaxed">{taskLog}</pre>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   )
                 })}
               </tbody>
             </table>
-            {expandedTask && (
-              <div className="border-t bg-muted/10 p-3">
-                <pre className="text-xs font-mono whitespace-pre-wrap max-h-80 overflow-y-auto text-muted-foreground leading-relaxed">{taskLog}</pre>
-              </div>
-            )}
           </div>
         )}
-        {tasksTotal > 30 && (
-          <div className="flex justify-center gap-2 mt-3">
-            <Button variant="outline" size="sm" disabled={tasksPage <= 1} onClick={() => setTasksPage(p => p - 1)}>上一页</Button>
-            <span className="text-xs text-muted-foreground self-center tabular-nums">{tasksPage} / {Math.ceil(tasksTotal / 30)}</span>
-            <Button variant="outline" size="sm" disabled={tasksPage >= Math.ceil(tasksTotal / 30)} onClick={() => setTasksPage(p => p + 1)}>下一页</Button>
+        {tasksTotal > 0 && (
+          <div className="flex items-center justify-between mt-3">
+            <span className="text-xs text-muted-foreground">共 {tasksTotal} 条任务</span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" disabled={tasksPage <= 1} onClick={() => setTasksPage(p => p - 1)}>上一页</Button>
+              <span className="text-xs text-muted-foreground tabular-nums">{tasksPage} / {Math.ceil(tasksTotal / 30)}</span>
+              <Button variant="outline" size="sm" disabled={tasksPage >= Math.ceil(tasksTotal / 30)} onClick={() => setTasksPage(p => p + 1)}>下一页</Button>
+            </div>
           </div>
         )}
       </div>
