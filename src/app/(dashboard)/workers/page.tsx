@@ -421,7 +421,7 @@ export default function WorkersPage() {
                   <option value="">不限</option>
                   {brands.map((b: any) => (
                     <option key={b.brand} value={b.brand}>
-                      {b.brand} ({b.available}可用)
+                      {b.brand} ({b.available}卡/{b.remainingUses}次)
                     </option>
                   ))}
                 </select>
@@ -452,11 +452,11 @@ export default function WorkersPage() {
               const isClaude = dAction === "claude-platform-bindcard"
               const emailAvail = isClaude ? (stats.mailcom?.available ?? 0) : (stats.openaiPool?.available ?? 0)
               const selectedBrand = brands.find((b: any) => b.brand === dBrand)
-              const cardAvail = dBrand
-                ? (selectedBrand?.available ?? 0)
-                : brands.reduce((s: number, b: any) => s + (b.available ?? 0), 0)
+              const cardUses = dBrand
+                ? (selectedBrand?.remainingUses ?? 0)
+                : brands.reduce((s: number, b: any) => s + (b.remainingUses ?? 0), 0)
               const proxyAvail = stats.proxies?.available ?? 0
-              const parts = [emailAvail, cardAvail, proxyAvail]
+              const parts = [emailAvail, cardUses, proxyAvail]
               if (isClaude) parts.push(stats.addresses?.available ?? 0)
               const maxCanDo = Math.min(...parts)
               return (
@@ -464,7 +464,7 @@ export default function WorkersPage() {
                   <span>可调度估算: <strong className="text-foreground tabular-nums">{maxCanDo}</strong></span>
                   <span className="text-muted-foreground/60">|</span>
                   <span>邮箱 <strong className="tabular-nums">{emailAvail}</strong></span>
-                  <span>卡 <strong className="tabular-nums">{cardAvail}</strong>{dBrand && <span className="text-muted-foreground/60"> ({dBrand})</span>}</span>
+                  <span>卡剩余次数 <strong className="tabular-nums">{cardUses}</strong>{dBrand && <span className="text-muted-foreground/60"> ({dBrand})</span>}</span>
                   <span>代理 <strong className="tabular-nums">{proxyAvail}</strong></span>
                   {isClaude && <span>地址 <strong className="tabular-nums">{stats.addresses?.available ?? 0}</strong></span>}
                 </div>

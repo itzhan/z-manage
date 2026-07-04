@@ -32,10 +32,17 @@ export async function GET(req: NextRequest) {
     balanceCond = ` AND (pa.balance IS NULL OR pa.balance >= ${minBalance})`;
   }
 
+  let remainingSql = '0';
+  if (platform && platformCol[platform]) {
+    const [used, max] = platformCol[platform];
+    remainingSql = `SUM(CASE WHEN ${availableSql}${balanceCond} THEN (${max} - ${used}) ELSE 0 END)`;
+  }
+
   const rows = db.prepare(`
     SELECT c.brand,
       COUNT(*) as total,
-      SUM(CASE WHEN ${availableSql}${balanceCond} THEN 1 ELSE 0 END) as available
+      SUM(CASE WHEN ${availableSql}${balanceCond} THEN 1 ELSE 0 END) as available,
+      ${remainingSql} as remainingUses
     FROM cards c
     ${balanceJoin}
     WHERE c.deleted = 0 AND c.brand IS NOT NULL AND c.brand != ''
@@ -44,7 +51,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     brands: rows.map(r => r.brand),
-    details: rows.map(r => ({ brand: r.brand, total: r.total, available: r.available })),
+    details: rows.map(r => ({ brand: r.brand, total: r.total, available: r.available, remainingUses: r.remainingUses ?? 0 })),
   });
 }
 
