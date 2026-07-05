@@ -1,9 +1,11 @@
-"""协议执行器 HTTP 服务 - 在宿主机上运行，接收 z-manage 的请求执行协议脚本"""
-import json, subprocess, sys, os, threading
+"""协议执行器 HTTP 服务 - 在宿主机上运行"""
+import json, sys, threading, traceback
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
-SCRIPT_PATH = str(Path(__file__).parent / "claude_protocol.py")
+sys.path.insert(0, str(Path(__file__).parent))
+from claude_protocol.console_flow import ConsoleArgs, run_console_flow
+
 PORT = 9876
 
 class Handler(BaseHTTPRequestHandler):
@@ -16,36 +18,43 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length)) if length > 0 else {}
 
-        args = ["python3", SCRIPT_PATH]
-        for k, v in body.items():
-            if v is not None and v != "":
-                args.extend([f"--{k.replace('_', '-')}", str(v)])
-
         try:
-            proc = subprocess.run(args, capture_output=True, text=True, timeout=600, cwd=str(Path(__file__).parent.parent))
-            last_line = proc.stdout.strip().split("\n")[-1] if proc.stdout else ""
-            try:
-                result = json.loads(last_line)
-            except Exception:
-                result = {"success": False, "error": f"exit {proc.returncode}: {proc.stderr[-200:] if proc.stderr else 'no output'}"}
+            args = ConsoleArgs(
+                email=body.get("email", ""),
+                password=body.get("password", ""),
+                email_source=body.get("email_source", "mailcom"),
+                outlook_client_id=body.get("outlook_client_id", ""),
+                outlook_refresh_token=body.get("outlook_refresh_token", ""),
+                card_number=body.get("card_number", ""),
+                card_expiry=body.get("card_expiry", ""),
+                card_cvv=body.get("card_cvv", ""),
+                amount=float(body.get("amount", 5)),
+                proxy=body.get("proxy", ""),
+                key_name=body.get("key_name", "auto-key"),
+                yescaptcha_key=body.get("yescaptcha_key", ""),
+            )
 
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(result).encode())
-        except subprocess.TimeoutExpired:
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"success": False, "error": "timeout 10min"}).encode())
+            result = run_console_flow(args)
+
+            resp = {
+                "success": result.success,
+                "key": result.api_key,
+                "email": args.email,
+                "balance": result.amount,
+                "org_id": result.org_id,
+                "error": result.error,
+            }
         except Exception as e:
-            self.send_response(500)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode())
+            traceback.print_exc()
+            resp = {"success": False, "error": str(e), "email": body.get("email", "")}
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(resp).encode())
 
     def log_message(self, format, *args):
-        pass  # quiet
+        pass
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else PORT
