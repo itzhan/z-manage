@@ -20,12 +20,11 @@ export async function POST(req: NextRequest) {
   const cap = `%"${action}"%`;
   const allWorkers = db.prepare(`SELECT * FROM workers WHERE status = 'online' AND capabilities LIKE ? ORDER BY runningTasks ASC`).all(cap) as any[];
 
-  // If specific workers requested, prioritize them but include all as fallback
   let workers: any[];
-  if (workerIds && workerIds.length > 0) {
-    const preferred = new Set(workerIds);
-    const selected = allWorkers.filter(w => preferred.has(w.id));
-    const rest = allWorkers.filter(w => !preferred.has(w.id));
+  const preferredSet = new Set(workerIds && workerIds.length > 0 ? workerIds : []);
+  if (preferredSet.size > 0) {
+    const selected = allWorkers.filter(w => preferredSet.has(w.id));
+    const rest = allWorkers.filter(w => !preferredSet.has(w.id));
     workers = [...selected, ...rest];
   } else {
     workers = allWorkers;
@@ -44,10 +43,15 @@ export async function POST(req: NextRequest) {
   for (const w of workers) workerLoad.set(w.id, w.runningTasks ?? 0);
 
   for (let i = 0; i < count; i++) {
-    // Pick worker with lowest load that hasn't hit max
+    // Pick worker: prefer selected worker first, then lowest load
     const available = workers
       .filter(w => (workerLoad.get(w.id) ?? 0) < w.maxTasks)
-      .sort((a, b) => (workerLoad.get(a.id) ?? 0) - (workerLoad.get(b.id) ?? 0));
+      .sort((a, b) => {
+        const aPreferred = preferredSet.has(a.id) ? 0 : 1;
+        const bPreferred = preferredSet.has(b.id) ? 0 : 1;
+        if (aPreferred !== bPreferred) return aPreferred - bPreferred;
+        return (workerLoad.get(a.id) ?? 0) - (workerLoad.get(b.id) ?? 0);
+      });
 
     if (available.length === 0) {
       // All workers full, remaining tasks fail
