@@ -409,29 +409,48 @@ class OutlookClient:
 # =====================================================================
 
 def poll_magic_link_mailcom(email: str, password: str,
-                            max_wait: int = 120, interval: int = 5) -> str:
-    """轮询 mail.com 收件箱获取 Claude magic link。"""
+                            max_wait: int = 120, interval: int = 5,
+                            after_ts: float = 0) -> str:
+    """轮询 mail.com 收件箱获取 Claude magic link。
+    after_ts: 只取该时间戳(epoch秒)之后的邮件，避免取到旧的。
+    """
+    if after_ts <= 0:
+        after_ts = time.time() - 10
+    seen_links: set = set()
     mc = MailComClient(email, password)
+    import logging
+    log = logging.getLogger(__name__)
     for attempt in range(max_wait // interval):
         try:
             mc.login()
             mails = mc.list_incoming(10)
-            for m in mails[:5]:
+            for m in mails[:10]:
+                # date 是 epoch 毫秒
+                mail_ts = m.date / 1000 if m.date > 1e12 else m.date
+                if mail_ts < after_ts:
+                    continue
+                if "anthropic" not in m.from_addr.lower() and "claude" not in m.subject.lower():
+                    continue
                 body = mc.get_body(m.id)
                 link = MAGIC_LINK_RE.search(body)
-                if link:
+                if link and link.group(0) not in seen_links:
                     return link.group(0)
         except Exception as e:
             if attempt < 3:
-                print(f"[mail] mail.com 登录/读信异常（重试 {attempt + 1}）: {e}")
+                log.warning("[mail] mail.com 登录/读信异常（重试 %d）: %s", attempt + 1, e)
         time.sleep(interval if attempt > 2 else 8)
     return ""
 
 
 def poll_magic_link_outlook(client_id: str, refresh_token: str,
-                            max_wait: int = 120, interval: int = 5) -> str:
+                            max_wait: int = 120, interval: int = 5,
+                            after_ts: float = 0) -> str:
     """轮询 Outlook 收件箱获取 Claude magic link。"""
+    if after_ts <= 0:
+        after_ts = time.time() - 10
     oc = OutlookClient(client_id, refresh_token)
+    import logging
+    log = logging.getLogger(__name__)
     for attempt in range(max_wait // interval):
         try:
             link = oc.find_magic_link()
@@ -439,6 +458,6 @@ def poll_magic_link_outlook(client_id: str, refresh_token: str,
                 return link
         except Exception as e:
             if attempt < 3:
-                print(f"[mail] Outlook 读邮件异常（重试 {attempt + 1}）: {e}")
+                log.warning("[mail] Outlook 读邮件异常（重试 %d）: %s", attempt + 1, e)
         time.sleep(interval if attempt > 2 else 8)
     return ""

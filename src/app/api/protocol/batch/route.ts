@@ -144,6 +144,28 @@ export async function POST(req: NextRequest) {
                 db.prepare("UPDATE cards SET allocatedTo = NULL WHERE id = ?").run(t.card.id);
                 db.prepare("UPDATE proxies SET allocatedTo = NULL WHERE id = ?").run(t.proxy.id);
                 globalSuccess++;
+
+                // Push key to hub immediately (retry 3 times)
+                const hubCfg = db.prepare("SELECT value FROM kv_settings WHERE key = 'auto_push'").get() as any;
+                const hubUrl = hubCfg ? (JSON.parse(hubCfg.value).hubUrl || '').replace(/\/+$/, '') : '';
+                if (hubUrl) {
+                  for (let _retry = 0; _retry < 3; _retry++) {
+                    try {
+                      const pushResp = await fetch(`${hubUrl}/api/keys`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ keys: [result.key] }),
+                      });
+                      const pushData = await pushResp.json();
+                      if (pushResp.ok && pushData.success !== false) {
+                        db.prepare("UPDATE registered_accounts SET exported = 1, exportedAt = ? WHERE email = ?").run(new Date().toISOString(), t.email.email);
+                        send({ type: 'hub_push', email: t.email.email, success: true, hubTotal: pushData.data?.total });
+                        break;
+                      }
+                    } catch { /* retry */ }
+                    if (_retry < 2) await new Promise(r => setTimeout(r, 2000));
+                  }
+                }
+
                 send({ type: 'task_done', batch: batchIdx + 1, taskIdx: i + 1, success: true, key: (result.key || '').slice(0, 30) + '...', email: t.email.email, globalSuccess, globalFailed, total: count, worker: worker.name });
               } else {
                 const errMsg = result.error || 'unknown';

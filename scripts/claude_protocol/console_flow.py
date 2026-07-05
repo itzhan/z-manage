@@ -65,14 +65,15 @@ def run_console_flow(args: ConsoleArgs) -> FlowResult:
     login = PlatformLogin(session, proxies)
 
     from .mail import poll_magic_link_mailcom, poll_magic_link_outlook
+    _magic_link_sent_at = time.time()
 
     def get_magic_link() -> str:
         if args.email_source == "outlook":
             return poll_magic_link_outlook(
                 args.outlook_client_id, args.outlook_refresh_token,
-                max_wait=120, interval=5,
+                max_wait=120, interval=5, after_ts=_magic_link_sent_at,
             )
-        return poll_magic_link_mailcom(args.email, args.password, max_wait=120, interval=5)
+        return poll_magic_link_mailcom(args.email, args.password, max_wait=120, interval=5, after_ts=_magic_link_sent_at)
 
     try:
         login_result = login.login(args.email, get_magic_link)

@@ -136,16 +136,33 @@ class PlatformLogin:
         except (ValueError, KeyError):
             pass
 
-        # ---- 3. 等待 magic link ----
-        log.info("3/4 等待 magic link ...")
-        magic_link = get_magic_link()
-        if not magic_link:
-            raise RuntimeError("magic link 获取超时")
-        log.info("  获取到 magic link: %s...", magic_link[:60])
+        # ---- 3+4. 获取并验证 magic link（最多重试2次）----
+        for _ml_attempt in range(3):
+            if _ml_attempt > 0:
+                log.info("重新发送 magic link (第%d次)...", _ml_attempt + 1)
+                self.session.post(
+                    f"{PLATFORM_BASE}/api/auth/send_magic_link",
+                    headers=self._anthropic_headers("/login"),
+                    data=json.dumps({"email_address": email, "source": "console", "utc_offset": 480}),
+                    proxies=self.proxies, timeout=30,
+                )
+                import time as _time
+                _time.sleep(3)
 
-        # ---- 4. 验证 magic link token → 获取 session ----
-        log.info("4/4 验证 magic link token")
-        return self._verify_magic_link(magic_link, email)
+            log.info("3/4 等待 magic link ...")
+            magic_link = get_magic_link()
+            if not magic_link:
+                raise RuntimeError("magic link 获取超时")
+            log.info("  获取到 magic link: %s...", magic_link[:60])
+
+            log.info("4/4 验证 magic link token")
+            try:
+                return self._verify_magic_link(magic_link, email)
+            except RuntimeError as e:
+                if "already_used" in str(e) and _ml_attempt < 2:
+                    log.warning("  magic link 已使用，重试获取新的...")
+                    continue
+                raise
 
     def _extract_initial_state(self, response) -> None:
         """从登录页响应中提取 cookie 和 build SHA。"""
