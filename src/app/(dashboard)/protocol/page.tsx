@@ -6,11 +6,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { RefreshCw, Play } from "lucide-react"
+import { RefreshCw, Play, Eye } from "lucide-react"
 
 function getKey() {
   return document.cookie.match(/z-api-key=([^;]+)/)?.[1] || ""
 }
+
+const MASK = (s: string) => s && s.length > 8 ? s.slice(0, 4) + "····" + s.slice(-4) : s || "—"
 
 export default function ProtocolPage() {
   const [stats, setStats] = useState<any>(null)
@@ -18,6 +20,7 @@ export default function ProtocolPage() {
   const [tasks, setTasks] = useState<any[]>([])
   const [tasksTotal, setTasksTotal] = useState(0)
   const [tasksPage, setTasksPage] = useState(1)
+  const [workers, setWorkers] = useState<any[]>([])
 
   // Form
   const [emailSource, setEmailSource] = useState("mailcom")
@@ -26,8 +29,11 @@ export default function ProtocolPage() {
   const [batchSize, setBatchSize] = useState(5)
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState("")
-  const [results, setResults] = useState<Array<{ email: string; success: boolean; key?: string; error?: string }>>([])
-  const [workers, setWorkers] = useState<any[]>([])
+  const [results, setResults] = useState<Array<{ email: string; success: boolean; key?: string; error?: string; worker?: string }>>([])
+
+  // Preview
+  const [showPreview, setShowPreview] = useState(false)
+  const [preview, setPreview] = useState<any>(null)
 
   const hdrs = () => ({ "X-API-Key": getKey(), "Content-Type": "application/json" })
 
@@ -49,10 +55,35 @@ export default function ProtocolPage() {
   useEffect(() => { load() }, [load])
   useEffect(() => { const t = setInterval(load, 10000); return () => clearInterval(t) }, [load])
 
+  const emailAvail = emailSource === "outlook" ? (stats?.outlook?.available ?? 0) : (stats?.mailcom?.available ?? 0)
+  const cardAvail = brand ? (brands.find(b => b.brand === brand)?.remainingUses ?? 0) : brands.reduce((s, b) => s + (b.remainingUses ?? 0), 0)
+  const proxyAvail = stats?.proxies?.available ?? 0
+  const addrAvail = stats?.addresses?.available ?? 0
+  const maxCanDo = Math.min(emailAvail, cardAvail, proxyAvail, addrAvail)
+  const onlineWorkers = workers.filter(w => w.status === "online")
+  const totalBatches = batchSize > 0 ? Math.ceil(count / batchSize) : 1
+
+  const loadPreview = async () => {
+    const previewCount = Math.min(count, 20)
+    const emailEndpoint = emailSource === "outlook" ? "outlook" : "mailcom"
+    const [emails, cards, proxies] = await Promise.all([
+      fetch(`/api/${emailEndpoint}/pull`, { method: "POST", headers: hdrs(), body: JSON.stringify({ count: previewCount, machineId: "preview", preview: true }) }).then(r => r.json()),
+      fetch("/api/cards/pull", { method: "POST", headers: hdrs(), body: JSON.stringify({ count: previewCount, machineId: "preview", platform: "claudePlatform", brand: brand || undefined, preview: true }) }).then(r => r.json()),
+      fetch("/api/proxies/pull", { method: "POST", headers: hdrs(), body: JSON.stringify({ count: previewCount, machineId: "preview", preview: true }) }).then(r => r.json()),
+    ])
+    setPreview({
+      emails: emails.accounts || emails.items || [],
+      cards: cards.cards || cards.items || [],
+      proxies: proxies.proxies || proxies.items || [],
+    })
+    setShowPreview(true)
+  }
+
   const dispatch = async () => {
     setRunning(true)
     setProgress("准备中...")
     setResults([])
+    setShowPreview(false)
     try {
       const res = await fetch("/api/protocol/batch", {
         method: "POST", headers: hdrs(),
@@ -72,15 +103,15 @@ export default function ProtocolPage() {
           if (!line.startsWith("data: ")) continue
           try {
             const ev = JSON.parse(line.slice(6))
-            if (ev.type === "start") setProgress(`开始 ${ev.total} 个任务 (${ev.batches}批)`)
-            else if (ev.type === "batch_start") setProgress(`第${ev.batch}/${ev.batches}批: 分配资源...`)
-            else if (ev.type === "batch_resources") setProgress(`第${ev.batch}批: ${ev.count}个任务开始执行`)
-            else if (ev.type === "task_start") setProgress(`[${ev.batch}] ${ev.taskIdx}/${ev.total} ${ev.email}`)
+            if (ev.type === "start") setProgress(`开始 ${ev.total} 个任务 (${ev.batches}批, ${onlineWorkers.length}节点)`)
+            else if (ev.type === "batch_start") setProgress(`第${ev.batch}/${ev.batches}批: 分配${ev.batchCount}个资源...`)
+            else if (ev.type === "batch_resources") setProgress(`第${ev.batch}批: ${ev.count}个任务分发中...`)
+            else if (ev.type === "task_start") setProgress(`[${ev.batch}] ${ev.taskIdx}/${ev.total} → ${ev.worker || ""} ${ev.email}`)
             else if (ev.type === "task_done") {
               setProgress(`[${ev.batch}] ${ev.globalSuccess + ev.globalFailed}/${ev.total} 成功${ev.globalSuccess} 失败${ev.globalFailed}`)
-              setResults(r => [...r, { email: ev.email, success: ev.success, key: ev.key, error: ev.error }])
+              setResults(r => [...r, { email: ev.email, success: ev.success, key: ev.key, error: ev.error, worker: ev.worker }])
             }
-            else if (ev.type === "batch_done") setProgress(`第${ev.batch}/${ev.batches}批完成`)
+            else if (ev.type === "batch_done") setProgress(`第${ev.batch}/${ev.batches}批完成 (成功${ev.globalSuccess} 失败${ev.globalFailed})`)
             else if (ev.type === "done") setProgress(`全部完成! 成功${ev.success} 失败${ev.failed}`)
             else if (ev.type === "error") setProgress(`错误: ${ev.message}`)
           } catch { /* skip */ }
@@ -93,12 +124,6 @@ export default function ProtocolPage() {
     load()
   }
 
-  const emailAvail = emailSource === "outlook" ? (stats?.outlook?.available ?? 0) : (stats?.mailcom?.available ?? 0)
-  const cardAvail = brand ? (brands.find(b => b.brand === brand)?.remainingUses ?? 0) : brands.reduce((s, b) => s + (b.remainingUses ?? 0), 0)
-  const proxyAvail = stats?.proxies?.available ?? 0
-  const addrAvail = stats?.addresses?.available ?? 0
-  const maxCanDo = Math.min(emailAvail, cardAvail, proxyAvail, addrAvail)
-
   const INPUT_CLS = "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
   const SELECT_CLS = INPUT_CLS + " appearance-none"
 
@@ -107,28 +132,25 @@ export default function ProtocolPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold">Claude 协议</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">直接在服务器上执行协议，无需 Worker</p>
+          <p className="text-sm text-muted-foreground mt-0.5">纯协议自动化，分发到 {onlineWorkers.length} 个节点并行执行</p>
         </div>
-        <Button variant="outline" size="sm" onClick={load}>
-          <RefreshCw className="h-3.5 w-3.5 mr-1.5" />刷新
-        </Button>
+        <Button variant="outline" size="sm" onClick={load}><RefreshCw className="h-3.5 w-3.5 mr-1.5" />刷新</Button>
       </div>
 
       {/* Protocol Workers */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm flex items-center gap-2">协议节点 <Badge variant="secondary">{workers.filter(w => w.status === "online").length}/{workers.length}</Badge></CardTitle>
+          <CardTitle className="text-sm flex items-center gap-2">协议节点 <Badge variant="secondary">{onlineWorkers.length}/{workers.length}</Badge></CardTitle>
         </CardHeader>
         <CardContent>
           {workers.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">暂无协议节点</p>
           ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-2">
+            <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
               {workers.map((w: any) => (
-                <div key={w.id} className={`border rounded-md px-3 py-2 text-xs ${w.status === "online" ? "border-green-500/30 bg-green-500/5" : w.status === "disabled" ? "opacity-40" : "border-border"}`}>
-                  <div className="font-medium truncate">{w.name}</div>
-                  <div className="text-muted-foreground truncate">{w.baseUrl?.replace("http://", "").replace(":9876", "")}</div>
-                  <Badge variant={w.status === "online" ? "default" : "secondary"} className="text-[9px] mt-1">{w.status}</Badge>
+                <div key={w.id} className={`border rounded-md px-2 py-1.5 text-center text-xs ${w.status === "online" ? "border-green-500/30 bg-green-500/5" : "opacity-40"}`}>
+                  <div className="font-medium truncate">{w.name.replace("协议-", "")}</div>
+                  <div className={`text-[9px] mt-0.5 ${w.status === "online" ? "text-green-600" : "text-muted-foreground"}`}>{w.status === "online" ? "在线" : w.status}</div>
                 </div>
               ))}
             </div>
@@ -162,13 +184,17 @@ export default function ProtocolPage() {
               <Input type="number" min={1} max={500} value={count} onChange={e => setCount(+e.target.value)} className="h-9" />
             </div>
             <div>
-              <Label className="text-xs mb-1 block">每批 ({Math.ceil(count / (batchSize || count))}批)</Label>
+              <Label className="text-xs mb-1 block">每批 ({totalBatches}批)</Label>
               <Input type="number" min={1} value={batchSize} onChange={e => setBatchSize(+e.target.value)} className="h-9" />
             </div>
             <div>
-              <Button onClick={dispatch} disabled={running || maxCanDo === 0} className="w-full h-9">
-                <Play className="h-3.5 w-3.5 mr-1" />
-                {running ? "运行中..." : "开始"}
+              <Button variant="outline" onClick={loadPreview} disabled={running || onlineWorkers.length === 0} className="w-full h-9">
+                <Eye className="h-3.5 w-3.5 mr-1" />预览
+              </Button>
+            </div>
+            <div>
+              <Button onClick={dispatch} disabled={running || maxCanDo === 0 || onlineWorkers.length === 0} className="w-full h-9">
+                <Play className="h-3.5 w-3.5 mr-1" />{running ? "运行中..." : "开始"}
               </Button>
             </div>
           </div>
@@ -176,11 +202,56 @@ export default function ProtocolPage() {
           {/* Estimate */}
           <div className="flex items-center gap-4 text-xs text-muted-foreground border-t pt-3">
             <span>可调度: <strong className="text-foreground tabular-nums">{maxCanDo}</strong></span>
+            <span className="text-muted-foreground/40">|</span>
             <span>邮箱 <strong className="tabular-nums">{emailAvail}</strong></span>
             <span>卡次数 <strong className="tabular-nums">{cardAvail}</strong></span>
             <span>代理 <strong className="tabular-nums">{proxyAvail}</strong></span>
             <span>地址 <strong className="tabular-nums">{addrAvail}</strong></span>
+            <span>节点 <strong className="tabular-nums">{onlineWorkers.length}</strong></span>
           </div>
+
+          {/* Preview */}
+          {showPreview && preview && (
+            <div className="border rounded-md bg-muted/20">
+              <div className="flex items-center justify-between px-4 pt-3 pb-2">
+                <p className="text-sm font-medium">调度预览 · {count} 个任务 → {onlineWorkers.length} 节点 × {totalBatches} 批</p>
+                <button onClick={() => setShowPreview(false)} className="text-muted-foreground hover:text-foreground text-xs">✕</button>
+              </div>
+              <div className="max-h-60 overflow-y-auto px-4">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-muted/60">
+                    <tr className="border-b">
+                      <th className="text-left py-1.5 font-medium w-8">#</th>
+                      <th className="text-left py-1.5 font-medium">邮箱</th>
+                      <th className="text-left py-1.5 font-medium">卡号</th>
+                      <th className="text-left py-1.5 font-medium">代理IP</th>
+                      <th className="text-left py-1.5 font-medium">节点</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: Math.min(count, 20) }).map((_, i) => (
+                      <tr key={i} className="border-b last:border-0">
+                        <td className="py-1.5 text-muted-foreground tabular-nums">{i + 1}</td>
+                        <td className="py-1.5">{preview.emails[i]?.email || <span className="text-red-500">不足</span>}</td>
+                        <td className="py-1.5 font-mono">{preview.cards[i]?.cardNumber ? MASK(preview.cards[i].cardNumber) : <span className="text-red-500">不足</span>}</td>
+                        <td className="py-1.5 font-mono">{preview.proxies[i] ? `${preview.proxies[i].host}:${preview.proxies[i].port}` : <span className="text-red-500">不足</span>}</td>
+                        <td className="py-1.5 text-muted-foreground">{onlineWorkers[i % onlineWorkers.length]?.name.replace("协议-", "") || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="px-4 py-3 flex items-center justify-between border-t">
+                <p className="text-xs text-muted-foreground">
+                  {preview.emails.length} 邮箱 · {preview.cards.length} 卡 · {preview.proxies.length} 代理
+                  {count > 20 && <span className="ml-1">(预览前20条)</span>}
+                </p>
+                <Button onClick={dispatch} disabled={running || maxCanDo === 0} size="sm">
+                  <Play className="h-3.5 w-3.5 mr-1" />{running ? "运行中..." : `确认执行 ${count} 个`}
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* Progress */}
           {progress && (
@@ -196,8 +267,11 @@ export default function ProtocolPage() {
           {results.length > 0 && (
             <div className="border-t pt-3 max-h-60 overflow-y-auto space-y-1">
               {results.map((r, i) => (
-                <div key={i} className={`text-xs ${r.success ? "text-green-600" : "text-red-500"}`}>
-                  {r.success ? "✓" : "✗"} {r.email} {r.success ? r.key : r.error}
+                <div key={i} className={`text-xs flex gap-2 ${r.success ? "text-green-600" : "text-red-500"}`}>
+                  <span>{r.success ? "✓" : "✗"}</span>
+                  <span className="truncate flex-1">{r.email}</span>
+                  <span className="text-muted-foreground">{r.worker}</span>
+                  <span className="font-mono truncate max-w-[200px]">{r.success ? r.key : r.error}</span>
                 </div>
               ))}
             </div>
@@ -208,7 +282,7 @@ export default function ProtocolPage() {
       {/* Task List */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm flex items-center gap-2">任务列表 <Badge variant="secondary">{tasksTotal}</Badge></CardTitle>
+          <CardTitle className="text-sm flex items-center gap-2">任务历史 <Badge variant="secondary">{tasksTotal}</Badge></CardTitle>
         </CardHeader>
         <CardContent>
           {tasks.length === 0 ? (
