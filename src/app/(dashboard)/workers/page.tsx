@@ -103,6 +103,7 @@ export default function WorkersPage() {
   const [dAmount, setDAmount] = useState(5)
   const [dSpendLimit, setDSpendLimit] = useState(1000)
   const [dBrand, setDBrand] = useState("")
+  const [dEmailSource, setDEmailSource] = useState("mailcom")
 
   useEffect(() => {
     try {
@@ -115,6 +116,7 @@ export default function WorkersPage() {
         if (s.amount) setDAmount(s.amount)
         if (s.spendLimit) setDSpendLimit(s.spendLimit)
         if (s.brand) setDBrand(s.brand)
+        if (s.emailSource) setDEmailSource(s.emailSource)
       }
     } catch { /* ignore */ }
   }, [])
@@ -122,9 +124,9 @@ export default function WorkersPage() {
   useEffect(() => {
     localStorage.setItem("z-dispatch-form", JSON.stringify({
       action: dAction, worker: dWorker, count: dCount,
-      amount: dAmount, spendLimit: dSpendLimit, brand: dBrand,
+      amount: dAmount, spendLimit: dSpendLimit, brand: dBrand, emailSource: dEmailSource,
     }))
-  }, [dAction, dWorker, dCount, dAmount, dSpendLimit, dBrand])
+  }, [dAction, dWorker, dCount, dAmount, dSpendLimit, dBrand, dEmailSource])
 
   // Auto-push bullets (server-side)
   const [autoPush, setAutoPush] = useState(false)
@@ -242,8 +244,8 @@ export default function WorkersPage() {
 
   const loadPreview = async () => {
     const platform = dAction === "claude-platform-bindcard" ? "claudePlatform" : "openaiPlatform"
-    const emailEndpoint = dAction === "claude-platform-bindcard" ? "mailcom" : "openai-pool"
     const isClaude = dAction === "claude-platform-bindcard"
+    const emailEndpoint = isClaude ? dEmailSource : "openai-pool"
 
     const fetches: Promise<Response>[] = [
       fetch(`/api/${emailEndpoint}/pull`, { method: "POST", headers: hdrs(), body: JSON.stringify({ count: dCount, machineId: "preview", preview: true }) }),
@@ -272,7 +274,7 @@ export default function WorkersPage() {
 
   const dispatch = async () => {
     setDispatching(true)
-    const params: any = { amount: dAmount }
+    const params: any = { amount: dAmount, emailSource: dEmailSource }
     if (dBrand) params.brand = dBrand
     if (dAction === "platform-bindcard") params.spendLimit = dSpendLimit
 
@@ -406,6 +408,13 @@ export default function WorkersPage() {
                 </select>
               </div>
               <div>
+                <Label className="text-xs mb-1 block">邮箱来源</Label>
+                <select value={dEmailSource} onChange={e => setDEmailSource(e.target.value)} className={SELECT_CLS}>
+                  <option value="mailcom">Mail.com</option>
+                  <option value="outlook">Outlook</option>
+                </select>
+              </div>
+              <div>
                 <Label className="text-xs mb-1 block">Worker</Label>
                 <select value={dWorker} onChange={e => setDWorker(e.target.value)} className={SELECT_CLS}>
                   <option value="auto">自动分配</option>
@@ -449,7 +458,7 @@ export default function WorkersPage() {
             {/* Estimate */}
             {stats && (() => {
               const isClaude = dAction === "claude-platform-bindcard"
-              const emailAvail = isClaude ? (stats.mailcom?.available ?? 0) : (stats.openaiPool?.available ?? 0)
+              const emailAvail = isClaude ? (dEmailSource === "outlook" ? (stats.outlook?.available ?? 0) : (stats.mailcom?.available ?? 0)) : (stats.openaiPool?.available ?? 0)
               const selectedBrand = brands.find((b: any) => b.brand === dBrand)
               const cardUses = dBrand
                 ? (selectedBrand?.remainingUses ?? 0)

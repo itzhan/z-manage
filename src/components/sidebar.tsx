@@ -33,6 +33,7 @@ const NAV_GROUPS = [
     items: [
       { href: "/cards", label: "支付卡", icon: CreditCard },
       { href: "/mailcom", label: "Mail.com", icon: Mail },
+      { href: "/outlook", label: "Outlook", icon: Mail },
       { href: "/openai-pool", label: "OpenAI账号池", icon: Database },
       { href: "/google", label: "谷歌账号", icon: User },
       { href: "/proxies", label: "代理IP", icon: Globe },

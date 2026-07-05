@@ -27,6 +27,11 @@ export async function GET(req: NextRequest) {
       available: count('mailcom_accounts', "banned = 0 AND allocatedTo IS NULL AND tokenStatus = 'ok'"),
       allocated: count('mailcom_accounts', 'allocatedTo IS NOT NULL'),
     },
+    outlook: {
+      total: count('outlook_accounts'),
+      available: count('outlook_accounts', "banned = 0 AND allocatedTo IS NULL AND tokenStatus = 'ok'"),
+      allocated: count('outlook_accounts', 'allocatedTo IS NOT NULL'),
+    },
     proxies: {
       total: count('proxies', 'deleted = 0'),
       available: count('proxies', 'deleted = 0 AND bad = 0 AND allocatedTo IS NULL'),

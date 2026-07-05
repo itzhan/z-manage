@@ -295,6 +295,65 @@ const CONFIGS: Record<string, ResourceConfig> = {
     ],
     pullResultKey: "accounts",
   },
+  outlook: {
+    importKey: "accounts",
+    importPlaceholder:
+      '粘贴 outlook JSON 数组\n[{"email": "...", "password": "...", "clientId": "...", "refreshToken": "..."}]',
+    columns: [
+      { key: "email", label: "邮箱", className: "font-mono text-xs" },
+      {
+        key: "tokenStatus",
+        label: "Token",
+        render: (v) =>
+          v === "ok" ? (
+            <Badge variant="success">ok</Badge>
+          ) : (
+            <Badge variant="destructive">{v}</Badge>
+          ),
+      },
+      {
+        key: "banned",
+        label: "状态",
+        render: (v) =>
+          v ? (
+            <Badge variant="destructive">封禁</Badge>
+          ) : (
+            <Badge variant="success">正常</Badge>
+          ),
+      },
+      {
+        key: "allocatedTo",
+        label: "分配",
+        render: (v) =>
+          v ? (
+            <Badge variant="outline">{v}</Badge>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          ),
+      },
+      {
+        key: "addedAt",
+        label: "添加时间",
+        render: (v) =>
+          v ? new Date(v).toLocaleDateString() : "—",
+      },
+    ],
+    statCards: (s) => [
+      { label: "可用", value: s?.available ?? 0 },
+      { label: "封禁", value: s?.banned ?? 0 },
+      { label: "已分配", value: s?.allocated ?? 0 },
+    ],
+    pullFields: [
+      {
+        key: "count",
+        label: "数量",
+        type: "number",
+        defaultValue: 10,
+        required: true,
+      },
+    ],
+    pullResultKey: "accounts",
+  },
   proxies: {
     importKey: "proxies",
     importPlaceholder:
@@ -624,7 +683,7 @@ const CONFIGS: Record<string, ResourceConfig> = {
 }
 
 const EXPORTABLE = new Set(["registered", "openai", "cards"])
-const TEXT_IMPORT_RESOURCES = new Set(["mailcom", "cards", "google", "proxies", "openai-pool"])
+const TEXT_IMPORT_RESOURCES = new Set(["mailcom", "cards", "google", "proxies", "openai-pool", "outlook"])
 const HAS_OPS_COL = new Set(["mailcom", "registered", "openai"])
 
 const INPUT_CLS =
@@ -949,6 +1008,9 @@ export default function ResourcePage({ resource, title }: Props) {
         body = { text: importText, pool: importPool, region: importRegion }
       } else if (resource === "openai-pool") {
         url = "/api/openai-pool/text-import"
+        body = { text: importText }
+      } else if (resource === "outlook") {
+        url = "/api/outlook/text-import"
         body = { text: importText }
       }
 
@@ -1673,7 +1735,9 @@ export default function ResourcePage({ resource, title }: Props) {
                           ? "每行一个: host:port:user:pass"
                           : resource === "openai-pool"
                             ? "每行一个 (---- 分隔):\n邮箱----密码----msRefreshToken"
-                            : ""
+                            : resource === "outlook"
+                              ? "每行一个 (---- 分隔):\n邮箱----密码----clientId----refreshToken"
+                              : ""
                 }
                 rows={12}
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none"

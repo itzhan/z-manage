@@ -262,6 +262,24 @@ function initTables(db: Database.Database) {
       addedAt  TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS outlook_accounts (
+      id              TEXT PRIMARY KEY,
+      email           TEXT NOT NULL UNIQUE,
+      password        TEXT NOT NULL,
+      clientId        TEXT NOT NULL,
+      refreshToken    TEXT NOT NULL,
+      accessToken     TEXT,
+      tokenStatus     TEXT DEFAULT 'ok',
+      tokenAt         TEXT,
+      tokenError      TEXT,
+      banned          INTEGER DEFAULT 0,
+      allocatedTo     TEXT,
+      allocatedAt     TEXT,
+      addedAt         TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_outlook_allocated ON outlook_accounts(allocatedTo);
+    CREATE INDEX IF NOT EXISTS idx_outlook_banned ON outlook_accounts(banned);
+
     CREATE TABLE IF NOT EXISTS kv_settings (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
