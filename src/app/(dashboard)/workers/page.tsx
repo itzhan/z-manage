@@ -105,6 +105,7 @@ export default function WorkersPage() {
   const [dSpendLimit, setDSpendLimit] = useState(1000)
   const [dBrand, setDBrand] = useState("")
   const [dEmailSource, setDEmailSource] = useState("mailcom")
+  const [dBatchSize, setDBatchSize] = useState(0)
 
   useEffect(() => {
     try {
@@ -118,6 +119,7 @@ export default function WorkersPage() {
         if (s.spendLimit) setDSpendLimit(s.spendLimit)
         if (s.brand) setDBrand(s.brand)
         if (s.emailSource) setDEmailSource(s.emailSource)
+        if (s.batchSize !== undefined) setDBatchSize(s.batchSize)
       }
     } catch { /* ignore */ }
   }, [])
@@ -125,9 +127,9 @@ export default function WorkersPage() {
   useEffect(() => {
     localStorage.setItem("z-dispatch-form", JSON.stringify({
       action: dAction, worker: dWorker, count: dCount,
-      amount: dAmount, spendLimit: dSpendLimit, brand: dBrand, emailSource: dEmailSource,
+      amount: dAmount, spendLimit: dSpendLimit, brand: dBrand, emailSource: dEmailSource, batchSize: dBatchSize,
     }))
-  }, [dAction, dWorker, dCount, dAmount, dSpendLimit, dBrand, dEmailSource])
+  }, [dAction, dWorker, dCount, dAmount, dSpendLimit, dBrand, dEmailSource, dBatchSize])
 
   // Auto-push bullets (server-side)
   const [autoPush, setAutoPush] = useState(false)
@@ -286,6 +288,7 @@ export default function WorkersPage() {
         body: JSON.stringify({
           action: dAction, count: dCount, params,
           workerIds: dWorker === "auto" ? undefined : [dWorker],
+          batchSize: dBatchSize > 0 ? dBatchSize : undefined,
         }),
       })
       if (!res.body) throw new Error("No stream")
@@ -302,9 +305,13 @@ export default function WorkersPage() {
           if (!line.startsWith("data: ")) continue
           try {
             const ev = JSON.parse(line.slice(6))
-            if (ev.type === "start") setDispatchProgress(`开始调度 ${ev.total} 个任务...`)
-            else if (ev.type === "progress") setDispatchProgress(`${ev.dispatched + ev.failed}/${ev.total}  成功${ev.dispatched} 失败${ev.failed}${ev.worker ? ` → ${ev.worker}` : ""}`)
-            else if (ev.type === "done") setDispatchProgress(`完成！成功 ${ev.dispatched}，失败 ${ev.failed}`)
+            if (ev.type === "start") setDispatchProgress(ev.batches > 1 ? `开始调度 ${ev.total} 个任务 (${ev.batches}批，每批${ev.batchSize})...` : `开始调度 ${ev.total} 个任务...`)
+            else if (ev.type === "batch_start") setDispatchProgress(`第${ev.batch}/${ev.batches}批: 派发 ${ev.batchCount} 个...`)
+            else if (ev.type === "progress") setDispatchProgress(`${ev.batch ? `[${ev.batch}/${ev.batches}] ` : ""}${ev.dispatched + ev.failed}/${ev.total}  成功${ev.dispatched} 失败${ev.failed}`)
+            else if (ev.type === "batch_dispatched") setDispatchProgress(`第${ev.batch}/${ev.batches}批派发完毕 (${ev.batchDispatched}成功)`)
+            else if (ev.type === "batch_waiting") setDispatchProgress(`第${ev.batch}批等待完成 (需${ev.threshold}/${ev.total}完成后开始下一批)...`)
+            else if (ev.type === "batch_poll") setDispatchProgress(`第${ev.batch}批: ${ev.finished}/${ev.total} 已完成 (需${ev.threshold}个)...`)
+            else if (ev.type === "done") setDispatchProgress(`全部完成！成功 ${ev.dispatched}，失败 ${ev.failed}`)
           } catch { /* skip */ }
         }
       }
@@ -461,8 +468,12 @@ export default function WorkersPage() {
                 </select>
               </div>
               <div>
-                <Label className="text-xs mb-1 block">数量</Label>
-                <Input type="number" min={1} max={100} value={dCount} onChange={e => setDCount(+e.target.value)} className="h-9" />
+                <Label className="text-xs mb-1 block">总数量</Label>
+                <Input type="number" min={1} max={500} value={dCount} onChange={e => setDCount(+e.target.value)} className="h-9" />
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">每批{dBatchSize > 0 ? ` (${Math.ceil(dCount / dBatchSize)}批)` : ""}</Label>
+                <Input type="number" min={0} value={dBatchSize} onChange={e => setDBatchSize(+e.target.value)} className="h-9" placeholder="0=不分批" />
               </div>
               <div>
                 <Label className="text-xs mb-1 block">充值金额</Label>
