@@ -22,13 +22,30 @@ export default function ProtocolPage() {
   const [tasksPage, setTasksPage] = useState(1)
   const [workers, setWorkers] = useState<any[]>([])
 
-  // Form
+  // Form — restore from localStorage
   const [emailSource, setEmailSource] = useState("mailcom")
   const [brand, setBrand] = useState("")
   const [count, setCount] = useState(10)
   const [batchSize, setBatchSize] = useState(5)
+  const [concPerWorker, setConcPerWorker] = useState(5)
   const [yescaptchaKey, setYescaptchaKey] = useState("af690436ae6d9b11a618c1f8779e48a33ff2083192726")
   const [running, setRunning] = useState(false)
+
+  useEffect(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem("z-protocol-form") || "{}")
+      if (s.emailSource) setEmailSource(s.emailSource)
+      if (s.brand) setBrand(s.brand)
+      if (s.count) setCount(s.count)
+      if (s.batchSize) setBatchSize(s.batchSize)
+      if (s.concPerWorker) setConcPerWorker(s.concPerWorker)
+      if (s.yescaptchaKey) setYescaptchaKey(s.yescaptchaKey)
+    } catch { /* ignore */ }
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem("z-protocol-form", JSON.stringify({ emailSource, brand, count, batchSize, concPerWorker, yescaptchaKey }))
+  }, [emailSource, brand, count, batchSize, concPerWorker, yescaptchaKey])
   const [progress, setProgress] = useState("")
   const [results, setResults] = useState<Array<{ email: string; success: boolean; key?: string; error?: string; worker?: string }>>([])
   const [expandedTask, setExpandedTask] = useState<string | null>(null)
@@ -56,7 +73,7 @@ export default function ProtocolPage() {
   }, [tasksPage])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { const t = setInterval(load, 10000); return () => clearInterval(t) }, [load])
+  useEffect(() => { const t = setInterval(load, running ? 3000 : 10000); return () => clearInterval(t) }, [load, running])
 
   const emailAvail = emailSource === "outlook" ? (stats?.outlook?.available ?? 0) : (stats?.mailcom?.available ?? 0)
   const cardAvail = brand ? (brands.find(b => b.brand === brand)?.remainingUses ?? 0) : brands.reduce((s, b) => s + (b.remainingUses ?? 0), 0)
@@ -90,7 +107,7 @@ export default function ProtocolPage() {
     try {
       const res = await fetch("/api/protocol/batch", {
         method: "POST", headers: hdrs(),
-        body: JSON.stringify({ count, batchSize, brand: brand || undefined, emailSource, yescaptchaKey }),
+        body: JSON.stringify({ count, batchSize, brand: brand || undefined, emailSource, yescaptchaKey, concurrencyPerWorker: concPerWorker }),
       })
       if (!res.body) throw new Error("No stream")
       const reader = res.body.getReader()
@@ -190,7 +207,11 @@ export default function ProtocolPage() {
               <Label className="text-xs mb-1 block">每批 ({totalBatches}批)</Label>
               <Input type="number" min={1} value={batchSize} onChange={e => setBatchSize(+e.target.value)} className="h-9" />
             </div>
-            <div className="col-span-2 sm:col-span-3 lg:col-span-6">
+            <div>
+              <Label className="text-xs mb-1 block">Worker并发</Label>
+              <Input type="number" min={1} max={20} value={concPerWorker} onChange={e => setConcPerWorker(+e.target.value)} className="h-9" />
+            </div>
+            <div className="col-span-2 sm:col-span-3 lg:col-span-5">
               <Label className="text-xs mb-1 block">YesCaptcha Key</Label>
               <Input value={yescaptchaKey} onChange={e => setYescaptchaKey(e.target.value)} className="h-9 font-mono text-xs" placeholder="打码API Key" />
             </div>

@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
   if (!a.ok) return a.error!;
 
   const body = await req.json();
-  const { count = 1, batchSize: rawBatchSize, brand, emailSource = 'mailcom', amount = 5, yescaptchaKey = '' } = body;
+  const { count = 1, batchSize: rawBatchSize, brand, emailSource = 'mailcom', amount = 5, yescaptchaKey = '', concurrencyPerWorker = 5 } = body;
 
   if (count < 1 || count > 500) return NextResponse.json({ error: 'count must be 1-500' }, { status: 400 });
 
@@ -83,21 +83,28 @@ export async function POST(req: NextRequest) {
         const protocolWorkers = db.prepare("SELECT * FROM workers WHERE status = 'online' AND capabilities LIKE '%claude-protocol%'").all() as any[];
         const workerUrls = protocolWorkers.length > 0 ? protocolWorkers.map(w => ({ url: w.baseUrl, name: w.name })) : [{ url: FALLBACK_SERVER, name: 'local' }];
 
-        // Execute tasks — distribute across workers, each worker handles concurrency internally
-        const CONCURRENCY = Math.min(workerUrls.length * 3, tasks.length);
-        let idx = 0;
-        let workerIdx = 0;
+        // Distribute tasks to workers round-robin
+        const workerQueues = new Map<number, Array<{ task: typeof tasks[0]; worker: typeof workerUrls[0] }>>();
+        for (let wi = 0; wi < workerUrls.length; wi++) workerQueues.set(wi, []);
+        for (let i = 0; i < tasks.length; i++) {
+          const wi = i % workerUrls.length;
+          workerQueues.get(wi)!.push({ task: tasks[i], worker: workerUrls[wi] });
+        }
 
-        const runOne = async () => {
-          while (idx < tasks.length) {
-            const i = idx++;
-            const wi = workerIdx++ % workerUrls.length;
-            const worker = workerUrls[wi];
-            const t = tasks[i];
-            const proxyUrl = `http://${t.proxy.user}:${t.proxy.pass}@${t.proxy.host}:${t.proxy.port}`;
+        // Each worker runs up to concurrencyPerWorker in parallel
+        const allWorkerPromises: Promise<void>[] = [];
+        for (const [, queue] of workerQueues) {
+          if (queue.length === 0) continue;
+          const workerPromise = (async () => {
+            let qIdx = 0;
+            const runSlot = async () => {
+              while (qIdx < queue.length) {
+                const qi = qIdx++;
+                const { task: t, worker } = queue[qi];
+                const proxyUrl = `http://${t.proxy.user}:${t.proxy.pass}@${t.proxy.host}:${t.proxy.port}`;
 
-            db.prepare('UPDATE dispatch_tasks SET status = ?, dispatchedAt = ? WHERE id = ?').run('running', new Date().toISOString(), t.taskId);
-            send({ type: 'task_start', batch: batchIdx + 1, taskIdx: i + 1, total: tasks.length, email: t.email.email, worker: worker.name });
+                db.prepare('UPDATE dispatch_tasks SET status = ?, dispatchedAt = ? WHERE id = ?').run('running', new Date().toISOString(), t.taskId);
+                send({ type: 'task_start', batch: batchIdx + 1, taskIdx: qi + 1, total: tasks.length, email: t.email.email, worker: worker.name });
 
             const reqBody: Record<string, string> = {
               email: t.email.email,
@@ -166,7 +173,7 @@ export async function POST(req: NextRequest) {
                   }
                 }
 
-                send({ type: 'task_done', batch: batchIdx + 1, taskIdx: i + 1, success: true, key: (result.key || '').slice(0, 30) + '...', email: t.email.email, globalSuccess, globalFailed, total: count, worker: worker.name });
+                send({ type: 'task_done', batch: batchIdx + 1, taskIdx: qi + 1, success: true, key: (result.key || '').slice(0, 30) + '...', email: t.email.email, globalSuccess, globalFailed, total: count, worker: worker.name });
               } else {
                 const errMsg = result.error || 'unknown';
                 db.prepare('UPDATE dispatch_tasks SET status = ?, errorReason = ?, finishedAt = ? WHERE id = ?').run('failed', errMsg, new Date().toISOString(), t.taskId);
@@ -187,7 +194,7 @@ export async function POST(req: NextRequest) {
                 }
 
                 globalFailed++;
-                send({ type: 'task_done', batch: batchIdx + 1, taskIdx: i + 1, success: false, error: errMsg, email: t.email.email, globalSuccess, globalFailed, total: count, worker: worker.name });
+                send({ type: 'task_done', batch: batchIdx + 1, taskIdx: qi + 1, success: false, error: errMsg, email: t.email.email, globalSuccess, globalFailed, total: count, worker: worker.name });
               }
             } catch (e: any) {
               db.prepare('UPDATE dispatch_tasks SET status = ?, errorReason = ?, finishedAt = ? WHERE id = ?').run('failed', e.message, new Date().toISOString(), t.taskId);
@@ -195,13 +202,32 @@ export async function POST(req: NextRequest) {
               db.prepare(`UPDATE cards SET allocatedTo = NULL, claudePlatformUsedCount = MAX(0, claudePlatformUsedCount - 1) WHERE id = ?`).run(t.card.id);
               db.prepare("UPDATE proxies SET allocatedTo = NULL WHERE id = ?").run(t.proxy.id);
               globalFailed++;
-              send({ type: 'task_done', batch: batchIdx + 1, taskIdx: i + 1, success: false, error: e.message, email: t.email.email, globalSuccess, globalFailed, total: count });
+              send({ type: 'task_done', batch: batchIdx + 1, taskIdx: qi + 1, success: false, error: e.message, email: t.email.email, globalSuccess, globalFailed, total: count });
+            }
+              }
+            };
+            await Promise.all(Array.from({ length: Math.min(concurrencyPerWorker, queue.length) }, () => runSlot()));
+          })();
+          allWorkerPromises.push(workerPromise);
+        }
+        await Promise.all(allWorkerPromises);
+
+        send({ type: 'batch_done', batch: batchIdx + 1, batches: totalBatches, globalSuccess, globalFailed });
+
+        // Wait for 2/3 of batch tasks to finish before next batch
+        if (batchIdx < totalBatches - 1) {
+          const batchTaskIds = tasks.map(t => t.taskId);
+          const threshold = Math.ceil(batchTaskIds.length * 2 / 3);
+          if (batchTaskIds.length > 0) {
+            const placeholders = batchTaskIds.map(() => '?').join(',');
+            for (let _w = 0; _w < 300; _w++) {
+              const finished = (db.prepare(`SELECT COUNT(*) as c FROM dispatch_tasks WHERE id IN (${placeholders}) AND status IN ('success','failed','cancelled')`).get(...batchTaskIds) as any).c;
+              if (finished >= threshold) break;
+              await new Promise(r => setTimeout(r, 5000));
+              send({ type: 'batch_poll', batch: batchIdx + 1, finished, threshold, total: batchTaskIds.length });
             }
           }
-        };
-
-        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, () => runOne()));
-        send({ type: 'batch_done', batch: batchIdx + 1, batches: totalBatches, globalSuccess, globalFailed });
+        }
       }
 
       logAllocation(db, 'protocol', 'batch', a.keyName || '未知', count, { globalSuccess, globalFailed, emailSource, brand });
