@@ -38,33 +38,90 @@ export async function POST(req: NextRequest) {
   let dispatched = 0;
   let failed = 0;
 
-  // Track running tasks in memory to respect maxTasks
-  const workerLoad = new Map<string, number>();
-  for (const w of workers) workerLoad.set(w.id, w.runningTasks ?? 0);
-
-  for (let i = 0; i < count; i++) {
-    // Pick worker: prefer selected worker first, then lowest load
-    const available = workers
-      .filter(w => (workerLoad.get(w.id) ?? 0) < w.maxTasks)
-      .sort((a, b) => {
-        const aPreferred = preferredSet.has(a.id) ? 0 : 1;
-        const bPreferred = preferredSet.has(b.id) ? 0 : 1;
-        if (aPreferred !== bPreferred) return aPreferred - bPreferred;
-        return (workerLoad.get(a.id) ?? 0) - (workerLoad.get(b.id) ?? 0);
-      });
-
-    if (available.length === 0) {
-      // All workers full, remaining tasks fail
-      for (let j = i; j < count; j++) {
-        const tid = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        db.prepare('INSERT INTO dispatch_tasks (id, action, status, params, errorReason, createdAt, finishedAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run(tid, action, 'failed', JSON.stringify(taskParams || {}), '所有 Worker 已满', now, now);
-        tasks.push(db.prepare('SELECT id, workerId, action, status, errorReason, createdAt FROM dispatch_tasks WHERE id = ?').get(tid));
-        failed++;
-      }
-      break;
+  // Calculate capacity-weighted allocation
+  const available = workers.filter(w => (w.runningTasks ?? 0) < w.maxTasks);
+  if (available.length === 0) {
+    for (let j = 0; j < count; j++) {
+      const tid = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      db.prepare('INSERT INTO dispatch_tasks (id, action, status, params, errorReason, createdAt, finishedAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run(tid, action, 'failed', JSON.stringify(taskParams || {}), '所有 Worker 已满', now, now);
+      tasks.push(db.prepare('SELECT id, workerId, action, status, errorReason, createdAt FROM dispatch_tasks WHERE id = ?').get(tid));
+      failed++;
     }
+    logAllocation(db, 'dispatch', 'batch', a.keyName!, count, { action, dispatched, failed });
+    return NextResponse.json({ created: count, dispatched, failed, tasks });
+  }
 
-    const worker = available[0];
+  // Build dispatch queue: distribute by available capacity ratio
+  const dispatchQueue: any[] = [];
+  if (preferredSet.size > 0) {
+    // Preferred mode: fill preferred workers first, overflow to rest
+    const preferred = available.filter(w => preferredSet.has(w.id));
+    const rest = available.filter(w => !preferredSet.has(w.id));
+    let remaining = count;
+    for (const w of preferred) {
+      const cap = w.maxTasks - (w.runningTasks ?? 0);
+      const n = Math.min(cap, remaining);
+      for (let j = 0; j < n; j++) dispatchQueue.push(w);
+      remaining -= n;
+    }
+    if (remaining > 0) {
+      const totalCap = rest.reduce((s: number, w: any) => s + (w.maxTasks - (w.runningTasks ?? 0)), 0);
+      if (totalCap > 0) {
+        for (const w of rest) {
+          const cap = w.maxTasks - (w.runningTasks ?? 0);
+          const n = Math.min(cap, Math.round(remaining * cap / totalCap));
+          for (let j = 0; j < n; j++) dispatchQueue.push(w);
+        }
+      }
+      while (dispatchQueue.length < count) {
+        const w = rest.find(w2 => dispatchQueue.filter(q => q.id === w2.id).length < (w2.maxTasks - (w2.runningTasks ?? 0)));
+        if (!w) break;
+        dispatchQueue.push(w);
+      }
+    }
+  } else {
+    // Auto mode: distribute by capacity weight
+    const totalCap = available.reduce((s: number, w: any) => s + (w.maxTasks - (w.runningTasks ?? 0)), 0);
+    let remaining = count;
+    const assigned = new Map<string, number>();
+    for (const w of available) {
+      const cap = w.maxTasks - (w.runningTasks ?? 0);
+      const n = Math.min(cap, Math.floor(count * cap / totalCap));
+      assigned.set(w.id, n);
+      remaining -= n;
+    }
+    // Distribute remainder to workers with most remaining capacity
+    const sorted = [...available].sort((a2, b2) => {
+      const aCap = (a2.maxTasks - (a2.runningTasks ?? 0)) - (assigned.get(a2.id) ?? 0);
+      const bCap = (b2.maxTasks - (b2.runningTasks ?? 0)) - (assigned.get(b2.id) ?? 0);
+      return bCap - aCap;
+    });
+    for (const w of sorted) {
+      if (remaining <= 0) break;
+      const cap = (w.maxTasks - (w.runningTasks ?? 0)) - (assigned.get(w.id) ?? 0);
+      if (cap > 0) { assigned.set(w.id, (assigned.get(w.id) ?? 0) + 1); remaining--; }
+    }
+    for (const w of available) {
+      const n = assigned.get(w.id) ?? 0;
+      for (let j = 0; j < n; j++) dispatchQueue.push(w);
+    }
+  }
+
+  // Cap to requested count
+  while (dispatchQueue.length > count) dispatchQueue.pop();
+
+  // If we couldn't fill all, mark remainder as failed
+  const shortfall = count - dispatchQueue.length;
+  for (let j = 0; j < shortfall; j++) {
+    const tid = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    db.prepare('INSERT INTO dispatch_tasks (id, action, status, params, errorReason, createdAt, finishedAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run(tid, action, 'failed', JSON.stringify(taskParams || {}), '所有 Worker 已满', now, now);
+    tasks.push(db.prepare('SELECT id, workerId, action, status, errorReason, createdAt FROM dispatch_tasks WHERE id = ?').get(tid));
+    failed++;
+  }
+
+  // Dispatch tasks from queue
+  for (let i = 0; i < dispatchQueue.length; i++) {
+    const worker = dispatchQueue[i];
     const taskId = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
     db.prepare('INSERT INTO dispatch_tasks (id, workerId, action, status, params, createdAt) VALUES (?, ?, ?, ?, ?, ?)').run(taskId, worker.id, action, 'pending', JSON.stringify(taskParams || {}), now);
@@ -84,7 +141,6 @@ export async function POST(req: NextRequest) {
 
       db.prepare('UPDATE dispatch_tasks SET status = ?, dispatchedAt = ? WHERE id = ?').run('dispatching', new Date().toISOString(), taskId);
       db.prepare('UPDATE workers SET runningTasks = runningTasks + 1 WHERE id = ?').run(worker.id);
-      workerLoad.set(worker.id, (workerLoad.get(worker.id) ?? 0) + 1);
       dispatched++;
     } catch (e: any) {
       db.prepare('UPDATE dispatch_tasks SET status = ?, errorReason = ?, finishedAt = ? WHERE id = ?').run('failed', `Worker 连接失败: ${e.message}`, new Date().toISOString(), taskId);
