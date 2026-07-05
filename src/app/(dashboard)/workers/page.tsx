@@ -82,6 +82,7 @@ export default function WorkersPage() {
   // Dialogs
   const [showAddWorker, setShowAddWorker] = useState(false)
   const [dispatching, setDispatching] = useState(false)
+  const [dispatchProgress, setDispatchProgress] = useState("")
   const [showPreview, setShowPreview] = useState(false)
   const [preview, setPreview] = useState<any>(null)
 
@@ -274,17 +275,42 @@ export default function WorkersPage() {
 
   const dispatch = async () => {
     setDispatching(true)
+    setDispatchProgress("准备中...")
     const params: any = { amount: dAmount, emailSource: dEmailSource }
     if (dBrand) params.brand = dBrand
     if (dAction === "platform-bindcard") params.spendLimit = dSpendLimit
 
-    await fetch("/api/dispatch/batch", {
-      method: "POST", headers: hdrs(),
-      body: JSON.stringify({
-        action: dAction, count: dCount, params,
-        workerIds: dWorker === "auto" ? undefined : [dWorker],
-      }),
-    })
+    try {
+      const res = await fetch("/api/dispatch/batch", {
+        method: "POST", headers: hdrs(),
+        body: JSON.stringify({
+          action: dAction, count: dCount, params,
+          workerIds: dWorker === "auto" ? undefined : [dWorker],
+        }),
+      })
+      if (!res.body) throw new Error("No stream")
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ""
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split("\n")
+        buf = lines.pop() || ""
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue
+          try {
+            const ev = JSON.parse(line.slice(6))
+            if (ev.type === "start") setDispatchProgress(`开始调度 ${ev.total} 个任务...`)
+            else if (ev.type === "progress") setDispatchProgress(`${ev.dispatched + ev.failed}/${ev.total}  成功${ev.dispatched} 失败${ev.failed}${ev.worker ? ` → ${ev.worker}` : ""}`)
+            else if (ev.type === "done") setDispatchProgress(`完成！成功 ${ev.dispatched}，失败 ${ev.failed}`)
+          } catch { /* skip */ }
+        }
+      }
+    } catch (e: any) {
+      setDispatchProgress(`错误: ${e.message}`)
+    }
     setDispatching(false)
     setShowPreview(false)
     load()
@@ -529,6 +555,12 @@ export default function WorkersPage() {
                       {dispatching ? "调度中..." : `确认调度 ${dCount} 个`}
                     </Button>
                   </div>
+                  {dispatchProgress && (
+                    <div className="px-4 py-2 border-t text-xs text-muted-foreground">
+                      {dispatching && <span className="inline-block w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin mr-2 align-middle" />}
+                      {dispatchProgress}
+                    </div>
+                  )}
                 </div>
               )
             })()}
