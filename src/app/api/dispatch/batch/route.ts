@@ -117,35 +117,52 @@ export async function POST(req: NextRequest) {
         send({ type: 'progress', dispatched, failed, total: count, message: `${shortfall} 个任务因 Worker 已满而失败` });
       }
 
-      for (let i = 0; i < dispatchQueue.length; i++) {
-        const worker = dispatchQueue[i];
-        const taskId = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-
+      // Prepare all tasks
+      const taskItems = dispatchQueue.map((worker, i) => {
+        const taskId = `t_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`;
         db.prepare('INSERT INTO dispatch_tasks (id, workerId, action, status, params, createdAt) VALUES (?, ?, ?, ?, ?, ?)').run(taskId, worker.id, action, 'pending', JSON.stringify(taskParams || {}), now);
+        return { taskId, worker };
+      });
 
-        try {
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 10000);
-          const resp = await fetch(`${worker.baseUrl}/task/start`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Worker-Token': worker.token || '' },
-            body: JSON.stringify({ taskId, action, params: taskParams || {}, masterUrl, masterApiKey: apiKey }),
-            signal: ctrl.signal,
-          });
-          clearTimeout(timer);
-
-          if (!resp.ok) throw new Error(`Worker responded ${resp.status}`);
-
-          db.prepare('UPDATE dispatch_tasks SET status = ?, dispatchedAt = ? WHERE id = ?').run('dispatching', new Date().toISOString(), taskId);
-          db.prepare('UPDATE workers SET runningTasks = runningTasks + 1 WHERE id = ?').run(worker.id);
-          dispatched++;
-        } catch (e: any) {
-          db.prepare('UPDATE dispatch_tasks SET status = ?, errorReason = ?, finishedAt = ? WHERE id = ?').run('failed', `Worker 连接失败: ${e.message}`, new Date().toISOString(), taskId);
-          failed++;
+      // Dispatch in parallel with concurrency limit and retry
+      const CONCURRENCY = 20;
+      let idx = 0;
+      const dispatchOne = async () => {
+        while (idx < taskItems.length) {
+          const i = idx++;
+          const { taskId, worker } = taskItems[i];
+          let ok = false;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              const ctrl = new AbortController();
+              const timer = setTimeout(() => ctrl.abort(), 10000);
+              const resp = await fetch(`${worker.baseUrl}/task/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Worker-Token': worker.token || '' },
+                body: JSON.stringify({ taskId, action, params: taskParams || {}, masterUrl, masterApiKey: apiKey }),
+                signal: ctrl.signal,
+              });
+              clearTimeout(timer);
+              if (!resp.ok) throw new Error(`Worker responded ${resp.status}`);
+              db.prepare('UPDATE dispatch_tasks SET status = ?, dispatchedAt = ? WHERE id = ?').run('dispatching', new Date().toISOString(), taskId);
+              db.prepare('UPDATE workers SET runningTasks = runningTasks + 1 WHERE id = ?').run(worker.id);
+              dispatched++;
+              ok = true;
+              break;
+            } catch (e: any) {
+              if (attempt < 2) {
+                await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+              } else {
+                db.prepare('UPDATE dispatch_tasks SET status = ?, errorReason = ?, finishedAt = ? WHERE id = ?').run('failed', `Worker 连接失败: ${e.message}`, new Date().toISOString(), taskId);
+                failed++;
+              }
+            }
+          }
+          send({ type: 'progress', dispatched, failed, total: count, current: dispatched + failed, worker: worker.name });
         }
+      };
 
-        send({ type: 'progress', dispatched, failed, total: count, current: i + 1, worker: worker.name });
-      }
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, taskItems.length) }, () => dispatchOne()));
 
       logAllocation(db, 'dispatch', 'batch', a.keyName!, count, { action, dispatched, failed });
       send({ type: 'done', created: count, dispatched, failed });
