@@ -15,6 +15,32 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   return NextResponse.json(worker);
 }
 
+export async function PUT(req: NextRequest, ctx: Ctx) {
+  const a = auth(req);
+  if (!a.ok) return a.error!;
+
+  const { id } = await ctx.params;
+  const body = await req.json();
+  const db = getDb();
+
+  const worker = db.prepare('SELECT * FROM workers WHERE id = ?').get(id) as any;
+  if (!worker) return NextResponse.json({ error: 'Worker not found' }, { status: 404 });
+
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (body.status !== undefined) { sets.push('status = ?'); vals.push(body.status); }
+  if (body.name !== undefined) { sets.push('name = ?'); vals.push(body.name); }
+  if (body.maxTasks !== undefined) { sets.push('maxTasks = ?'); vals.push(body.maxTasks); }
+
+  if (sets.length > 0) {
+    vals.push(id);
+    db.prepare(`UPDATE workers SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  const updated = db.prepare('SELECT * FROM workers WHERE id = ?').get(id);
+  return NextResponse.json(updated);
+}
+
 export async function DELETE(req: NextRequest, ctx: Ctx) {
   const a = auth(req);
   if (!a.ok) return a.error!;

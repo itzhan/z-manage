@@ -130,6 +130,7 @@ export default function WorkersPage() {
   const [autoPush, setAutoPush] = useState(false)
   const [autoPushLog, setAutoPushLog] = useState("")
   const [hubUrl, setHubUrl] = useState("http://38.34.191.113:3104")
+  const [hubPoolCount, setHubPoolCount] = useState<number | null>(null)
 
   const fetchAutoPushStatus = useCallback(async () => {
     try {
@@ -139,6 +140,7 @@ export default function WorkersPage() {
         setAutoPush(s.enabled)
         setHubUrl(s.hubUrl || "http://38.34.191.113:3104")
         setAutoPushLog(s.log || "")
+        if (s.hubPoolCount !== null && s.hubPoolCount !== undefined) setHubPoolCount(s.hubPoolCount)
       }
     } catch { /* ignore */ }
   }, [])
@@ -214,6 +216,11 @@ export default function WorkersPage() {
   const deleteWorker = async (id: string) => {
     if (!confirm("确定删除此 Worker？")) return
     await fetch(`/api/workers/${id}`, { method: "DELETE", headers: hdrs() })
+    load()
+  }
+
+  const toggleWorker = async (id: string, status: string) => {
+    await fetch(`/api/workers/${id}`, { method: "PUT", headers: hdrs(), body: JSON.stringify({ status }) })
     load()
   }
 
@@ -337,34 +344,50 @@ export default function WorkersPage() {
           </Button>
         </div>
         {workers.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-8 text-center">暂无 Worker，点击上方按钮添加</p>
+          <p className="text-sm text-muted-foreground py-8 text-center">暂无 Worker</p>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {workers.map((w: any) => (
-              <Card key={w.id}>
-                <CardContent className="pt-4 pb-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Server className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium text-sm">{w.name}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <Badge variant={w.status === "online" ? "success" : "secondary"}>{w.status}</Badge>
-                      <button onClick={() => openEditWorker(w)} className="text-muted-foreground hover:text-foreground transition-colors">
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button onClick={() => deleteWorker(w.id)} className="text-muted-foreground hover:text-destructive transition-colors">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="text-xs text-muted-foreground space-y-0.5">
-                    <p className="font-mono truncate">{w.baseUrl}</p>
-                    <p>任务: <span className="tabular-nums">{w.runningTasks}/{w.maxTasks}</span> · 心跳: {timeAgo(w.lastHeartbeat)}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+          <div className="border rounded-md overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/30">
+                  <th className="text-left px-3 py-2 font-medium text-xs">名称</th>
+                  <th className="text-left px-3 py-2 font-medium text-xs">地址</th>
+                  <th className="text-left px-3 py-2 font-medium text-xs">状态</th>
+                  <th className="text-left px-3 py-2 font-medium text-xs">任务</th>
+                  <th className="text-left px-3 py-2 font-medium text-xs">心跳</th>
+                  <th className="text-left px-3 py-2 font-medium text-xs w-28">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workers.map((w: any) => (
+                  <tr key={w.id} className={`border-b last:border-0 hover:bg-muted/20 ${w.status === "disabled" ? "opacity-50" : ""}`}>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <Server className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="font-medium">{w.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground truncate max-w-[200px]">{w.baseUrl}</td>
+                    <td className="px-3 py-2">
+                      <Badge variant={w.status === "online" ? "default" : w.status === "disabled" ? "destructive" : "secondary"}>{w.status === "disabled" ? "已禁用" : w.status}</Badge>
+                    </td>
+                    <td className="px-3 py-2 text-xs tabular-nums">{w.runningTasks}/{w.maxTasks}</td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">{timeAgo(w.lastHeartbeat)}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-1">
+                        {w.status === "disabled" ? (
+                          <button onClick={() => toggleWorker(w.id, "online")} className="text-xs text-green-600 hover:underline">启用</button>
+                        ) : (
+                          <button onClick={() => toggleWorker(w.id, "disabled")} className="text-xs text-muted-foreground hover:text-amber-600">禁用</button>
+                        )}
+                        <button onClick={() => openEditWorker(w)} className="text-muted-foreground hover:text-foreground transition-colors"><Pencil className="h-3 w-3" /></button>
+                        <button onClick={() => deleteWorker(w.id)} className="text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="h-3 w-3" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
@@ -519,6 +542,11 @@ export default function WorkersPage() {
                   disabled={autoPush}
                 />
               </div>
+              {hubPoolCount !== null && (
+                <span className="text-xs text-muted-foreground border border-border rounded-md px-2 py-1">
+                  中枢池: <strong className="text-foreground tabular-nums">{hubPoolCount}</strong>
+                </span>
+              )}
               <Button
                 size="sm"
                 variant={autoPush ? "destructive" : "default"}

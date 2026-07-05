@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
     const placeholders = emails.map(() => '?').join(',');
     rows = db.prepare(`SELECT email, password FROM mailcom_accounts WHERE email IN (${placeholders})`).all(...emails) as any[];
   } else {
-    rows = db.prepare(`SELECT email, password FROM mailcom_accounts WHERE tokenStatus != 'ok' OR accessToken IS NULL`).all() as any[];
+    rows = db.prepare(`SELECT email, password FROM mailcom_accounts WHERE tokenStatus = 'failed' OR (tokenStatus = 'ok' AND accessToken IS NULL)`).all() as any[];
   }
 
   if (rows.length === 0) {

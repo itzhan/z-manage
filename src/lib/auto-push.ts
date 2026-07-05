@@ -16,6 +16,11 @@ function saveLog(msg: string) {
   db.prepare("INSERT OR REPLACE INTO kv_settings (key, value) VALUES ('auto_push_log', ?)").run(msg);
 }
 
+function saveHubPool(count: number) {
+  const db = getDb();
+  db.prepare("INSERT OR REPLACE INTO kv_settings (key, value) VALUES ('hub_pool_count', ?)").run(String(count));
+}
+
 async function tick() {
   const cfg = getConfig();
   if (!cfg?.enabled) { stop(); return; }
@@ -43,18 +48,18 @@ async function tick() {
         const emails = rows.map(r => r.email);
         const placeholders = emails.map(() => '?').join(',');
         db.prepare(`UPDATE registered_accounts SET exported = 1, exportedAt = ? WHERE email IN (${placeholders})`).run(new Date().toISOString(), ...emails);
+        saveHubPool(data.data?.total);
         saveLog(`已推送 ${rows.length} 个，中枢新增 ${data.data?.added ?? '?'}，池中共 ${data.data?.total ?? '?'}`);
       } else {
         saveLog(`推送失败: ${data.error || '远端返回错误'}`);
       }
     } else {
-      let poolInfo = '';
       try {
         const poolRes = await fetch(hubUrl + '/api/keys');
         const pd = await poolRes.json();
-        if (pd.success) poolInfo = ` · 中枢池: ${pd.data.total}`;
+        if (pd.success) saveHubPool(pd.data.total);
       } catch { /* ignore */ }
-      saveLog(`无未导出${poolInfo}`);
+      saveLog(`无未导出`);
     }
   } catch (e: any) {
     saveLog(`错误: ${e.message}`);
@@ -77,11 +82,13 @@ export function getStatus() {
   const cfg = getConfig();
   const db = getDb();
   const logRow = db.prepare("SELECT value FROM kv_settings WHERE key = 'auto_push_log'").get() as any;
+  const poolRow = db.prepare("SELECT value FROM kv_settings WHERE key = 'hub_pool_count'").get() as any;
   return {
     enabled: cfg?.enabled || false,
     hubUrl: cfg?.hubUrl || 'http://38.34.191.113:3104',
     running: isRunning(),
     log: logRow?.value || lastLog || '',
+    hubPoolCount: poolRow ? parseInt(poolRow.value) : null,
   };
 }
 
