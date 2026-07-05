@@ -26,6 +26,7 @@ const NAV_GROUPS = [
     items: [
       { href: "/", label: "概览", icon: LayoutDashboard },
       { href: "/workers", label: "Worker调度", icon: Server },
+      { href: "/protocol", label: "Claude协议", icon: Key },
     ],
   },
   {
