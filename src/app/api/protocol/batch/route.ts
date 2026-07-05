@@ -171,8 +171,21 @@ export async function POST(req: NextRequest) {
                 const errMsg = result.error || 'unknown';
                 db.prepare('UPDATE dispatch_tasks SET status = ?, errorReason = ?, finishedAt = ? WHERE id = ?').run('failed', errMsg, new Date().toISOString(), t.taskId);
                 db.prepare(`UPDATE ${emailTable} SET allocatedTo = NULL WHERE id = ?`).run(t.email.id);
-                db.prepare(`UPDATE cards SET allocatedTo = NULL, claudePlatformUsedCount = MAX(0, claudePlatformUsedCount - 1) WHERE id = ?`).run(t.card.id);
                 db.prepare("UPDATE proxies SET allocatedTo = NULL WHERE id = ?").run(t.proxy.id);
+
+                // 402 / card_declined → 标记卡 disabled，不回退次数
+                if (/402|card_declined|card was declined/i.test(errMsg)) {
+                  db.prepare("UPDATE cards SET allocatedTo = NULL, status = 'disabled' WHERE id = ?").run(t.card.id);
+                } else {
+                  // 其他失败（429限速/网络等）→ 回退卡次数
+                  db.prepare(`UPDATE cards SET allocatedTo = NULL, claudePlatformUsedCount = MAX(0, claudePlatformUsedCount - 1) WHERE id = ?`).run(t.card.id);
+                }
+
+                // 封号 → 标记邮箱 banned
+                if (/banned|suspended|deactivated/i.test(errMsg)) {
+                  db.prepare(`UPDATE ${emailTable} SET banned = 1 WHERE id = ?`).run(t.email.id);
+                }
+
                 globalFailed++;
                 send({ type: 'task_done', batch: batchIdx + 1, taskIdx: i + 1, success: false, error: errMsg, email: t.email.email, globalSuccess, globalFailed, total: count, worker: worker.name });
               }
