@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
   if (!a.ok) return a.error!;
 
   const body = await req.json();
-  const { count = 1, batchSize: rawBatchSize, brand, emailSource = 'mailcom', amount = 5 } = body;
+  const { count = 1, batchSize: rawBatchSize, brand, emailSource = 'mailcom', amount = 5, yescaptchaKey = '' } = body;
 
   if (count < 1 || count > 500) return NextResponse.json({ error: 'count must be 1-500' }, { status: 400 });
 
@@ -110,6 +110,7 @@ export async function POST(req: NextRequest) {
               amount: String(amount),
               master_url: masterUrl,
               master_api_key: apiKey,
+              yescaptcha_key: yescaptchaKey,
             };
             if (emailSource === 'outlook') {
               reqBody.outlook_client_id = t.email.clientId || '';
@@ -129,7 +130,12 @@ export async function POST(req: NextRequest) {
                 signal: ctrl.signal,
               });
               clearTimeout(timer);
-              const result = await resp.json() as { success: boolean; key?: string; error?: string };
+              const result = await resp.json() as { success: boolean; key?: string; error?: string; log?: string; org_id?: string; balance?: number };
+
+              // Save log
+              if (result.log) {
+                db.prepare('UPDATE dispatch_tasks SET log = ? WHERE id = ?').run(result.log, t.taskId);
+              }
 
               if (result.success && result.key) {
                 db.prepare('UPDATE dispatch_tasks SET status = ?, result = ?, finishedAt = ? WHERE id = ?').run('success', JSON.stringify(result), new Date().toISOString(), t.taskId);
@@ -138,7 +144,7 @@ export async function POST(req: NextRequest) {
                 db.prepare("UPDATE cards SET allocatedTo = NULL WHERE id = ?").run(t.card.id);
                 db.prepare("UPDATE proxies SET allocatedTo = NULL WHERE id = ?").run(t.proxy.id);
                 globalSuccess++;
-                send({ type: 'task_done', batch: batchIdx + 1, taskIdx: i + 1, success: true, key: (result.key || '').slice(0, 30) + '...', email: t.email.email, globalSuccess, globalFailed, total: count });
+                send({ type: 'task_done', batch: batchIdx + 1, taskIdx: i + 1, success: true, key: (result.key || '').slice(0, 30) + '...', email: t.email.email, globalSuccess, globalFailed, total: count, worker: worker.name });
               } else {
                 const errMsg = result.error || 'unknown';
                 db.prepare('UPDATE dispatch_tasks SET status = ?, errorReason = ?, finishedAt = ? WHERE id = ?').run('failed', errMsg, new Date().toISOString(), t.taskId);
@@ -146,7 +152,7 @@ export async function POST(req: NextRequest) {
                 db.prepare(`UPDATE cards SET allocatedTo = NULL, claudePlatformUsedCount = MAX(0, claudePlatformUsedCount - 1) WHERE id = ?`).run(t.card.id);
                 db.prepare("UPDATE proxies SET allocatedTo = NULL WHERE id = ?").run(t.proxy.id);
                 globalFailed++;
-                send({ type: 'task_done', batch: batchIdx + 1, taskIdx: i + 1, success: false, error: errMsg, email: t.email.email, globalSuccess, globalFailed, total: count });
+                send({ type: 'task_done', batch: batchIdx + 1, taskIdx: i + 1, success: false, error: errMsg, email: t.email.email, globalSuccess, globalFailed, total: count, worker: worker.name });
               }
             } catch (e: any) {
               db.prepare('UPDATE dispatch_tasks SET status = ?, errorReason = ?, finishedAt = ? WHERE id = ?').run('failed', e.message, new Date().toISOString(), t.taskId);

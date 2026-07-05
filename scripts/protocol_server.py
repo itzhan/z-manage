@@ -1,5 +1,5 @@
 """协议执行器 HTTP 服务 - 在宿主机上运行（多线程）"""
-import json, sys, threading, traceback
+import json, sys, logging, traceback, io
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from pathlib import Path
@@ -18,6 +18,14 @@ class Handler(BaseHTTPRequestHandler):
 
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length)) if length > 0 else {}
+
+        # Capture logs for this request
+        log_stream = io.StringIO()
+        log_handler = logging.StreamHandler(log_stream)
+        log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
+        root_logger = logging.getLogger()
+        root_logger.addHandler(log_handler)
+        root_logger.setLevel(logging.INFO)
 
         try:
             args = ConsoleArgs(
@@ -44,10 +52,13 @@ class Handler(BaseHTTPRequestHandler):
                 "balance": result.amount,
                 "org_id": result.org_id,
                 "error": result.error,
+                "log": log_stream.getvalue(),
             }
         except Exception as e:
             traceback.print_exc()
-            resp = {"success": False, "error": str(e), "email": body.get("email", "")}
+            resp = {"success": False, "error": str(e), "email": body.get("email", ""), "log": log_stream.getvalue()}
+        finally:
+            root_logger.removeHandler(log_handler)
 
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -60,6 +71,7 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else PORT
     print(f"Protocol server listening on :{port}")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
     class ThreadedServer(ThreadingMixIn, HTTPServer):
         daemon_threads = True
     ThreadedServer(("0.0.0.0", port), Handler).serve_forever()

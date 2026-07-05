@@ -27,9 +27,12 @@ export default function ProtocolPage() {
   const [brand, setBrand] = useState("")
   const [count, setCount] = useState(10)
   const [batchSize, setBatchSize] = useState(5)
+  const [yescaptchaKey, setYescaptchaKey] = useState("af690436ae6d9b11a618c1f8779e48a33ff2083192726")
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState("")
   const [results, setResults] = useState<Array<{ email: string; success: boolean; key?: string; error?: string; worker?: string }>>([])
+  const [expandedTask, setExpandedTask] = useState<string | null>(null)
+  const [taskLog, setTaskLog] = useState("")
 
   // Preview
   const [showPreview, setShowPreview] = useState(false)
@@ -87,7 +90,7 @@ export default function ProtocolPage() {
     try {
       const res = await fetch("/api/protocol/batch", {
         method: "POST", headers: hdrs(),
-        body: JSON.stringify({ count, batchSize, brand: brand || undefined, emailSource }),
+        body: JSON.stringify({ count, batchSize, brand: brand || undefined, emailSource, yescaptchaKey }),
       })
       if (!res.body) throw new Error("No stream")
       const reader = res.body.getReader()
@@ -186,6 +189,10 @@ export default function ProtocolPage() {
             <div>
               <Label className="text-xs mb-1 block">每批 ({totalBatches}批)</Label>
               <Input type="number" min={1} value={batchSize} onChange={e => setBatchSize(+e.target.value)} className="h-9" />
+            </div>
+            <div className="col-span-2 sm:col-span-3 lg:col-span-6">
+              <Label className="text-xs mb-1 block">YesCaptcha Key</Label>
+              <Input value={yescaptchaKey} onChange={e => setYescaptchaKey(e.target.value)} className="h-9 font-mono text-xs" placeholder="打码API Key" />
             </div>
             <div>
               <Button variant="outline" onClick={loadPreview} disabled={running || onlineWorkers.length === 0} className="w-full h-9">
@@ -303,18 +310,49 @@ export default function ProtocolPage() {
                   {tasks.map((t: any) => {
                     const resources = t.resources ? JSON.parse(t.resources) : {};
                     const result = t.result ? JSON.parse(t.result) : null;
+                    const isExpanded = expandedTask === t.id;
                     return (
-                      <tr key={t.id} className="border-b last:border-0 hover:bg-muted/20">
-                        <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{t.id?.slice(-8)}</td>
-                        <td className="px-3 py-2 text-xs">{resources.mailcomEmail || "—"}</td>
-                        <td className="px-3 py-2">
-                          <Badge variant={t.status === "success" ? "default" : t.status === "failed" ? "destructive" : "secondary"}>{t.status}</Badge>
-                        </td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground max-w-48 truncate">
-                          {result?.key ? <span className="font-mono">{result.key.slice(0, 25)}...</span> : t.errorReason || "—"}
-                        </td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground">{t.createdAt ? new Date(t.createdAt).toLocaleTimeString() : "—"}</td>
-                      </tr>
+                      <>
+                        <tr key={t.id} className="border-b last:border-0 hover:bg-muted/20 cursor-pointer" onClick={async () => {
+                          if (isExpanded) { setExpandedTask(null); return; }
+                          setExpandedTask(t.id);
+                          try { const r = await fetch(`/api/dispatch/${t.id}/log`, { headers: { "X-API-Key": getKey() } }); if (r.ok) setTaskLog((await r.json()).log || "(空)"); } catch { setTaskLog("加载失败"); }
+                        }}>
+                          <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{t.id?.slice(-8)}</td>
+                          <td className="px-3 py-2 text-xs">{resources.mailcomEmail || "—"}</td>
+                          <td className="px-3 py-2">
+                            <Badge variant={t.status === "success" ? "default" : t.status === "failed" ? "destructive" : t.status === "running" ? "secondary" : "outline"}>{t.status}</Badge>
+                          </td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground max-w-48 truncate">
+                            {result?.key ? <span className="font-mono">{result.key.slice(0, 25)}...</span> : t.errorReason || "—"}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground">{t.createdAt ? new Date(t.createdAt).toLocaleTimeString() : "—"}</td>
+                        </tr>
+                        {isExpanded && (
+                          <tr key={`${t.id}-detail`}>
+                            <td colSpan={5} className="bg-muted/10 p-3 border-b">
+                              <div className="space-y-2 text-xs">
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div><span className="text-muted-foreground">邮箱:</span> {resources.mailcomEmail || "—"}</div>
+                                  <div><span className="text-muted-foreground">来源:</span> {resources.emailSource || "mailcom"}</div>
+                                  <div><span className="text-muted-foreground">卡ID:</span> <span className="font-mono">{resources.cardId || "—"}</span></div>
+                                  <div><span className="text-muted-foreground">代理:</span> <span className="font-mono">{resources.proxyId || "—"}</span></div>
+                                  {result?.org_id && <div><span className="text-muted-foreground">OrgID:</span> {result.org_id}</div>}
+                                  {result?.balance > 0 && <div><span className="text-muted-foreground">余额:</span> ${result.balance}</div>}
+                                </div>
+                                {result?.key && <div><span className="text-muted-foreground">API Key:</span> <span className="font-mono break-all">{result.key}</span></div>}
+                                {t.errorReason && <div><span className="text-muted-foreground">错误:</span> <span className="text-red-500">{t.errorReason}</span></div>}
+                                {taskLog && taskLog !== "(空)" && (
+                                  <div>
+                                    <span className="text-muted-foreground">日志:</span>
+                                    <pre className="mt-1 text-[11px] font-mono whitespace-pre-wrap max-h-40 overflow-y-auto bg-muted/30 rounded p-2 text-muted-foreground">{taskLog}</pre>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     );
                   })}
                 </tbody>
