@@ -684,7 +684,7 @@ const CONFIGS: Record<string, ResourceConfig> = {
 
 const EXPORTABLE = new Set(["registered", "openai", "cards"])
 const TEXT_IMPORT_RESOURCES = new Set(["mailcom", "cards", "google", "proxies", "openai-pool", "outlook"])
-const HAS_OPS_COL = new Set(["mailcom", "registered", "openai"])
+const HAS_OPS_COL = new Set(["mailcom", "registered", "openai", "outlook"])
 
 const INPUT_CLS =
   "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -1154,8 +1154,9 @@ export default function ResourcePage({ resource, title }: Props) {
     setMailBody("")
     setInboxLoading(true)
     try {
+      const inboxApi = resource === "outlook" ? "/api/outlook/inbox" : "/api/mailcom/inbox"
       const res = await fetch(
-        `/api/mailcom/inbox?email=${encodeURIComponent(email)}`,
+        `${inboxApi}?email=${encodeURIComponent(email)}`,
         { headers: { "X-API-Key": getKey() } }
       )
       const d = await res.json()
@@ -1170,8 +1171,9 @@ export default function ResourcePage({ resource, title }: Props) {
     setMailBodyLoading(true)
     setMailBody("")
     try {
+      const inboxApi = resource === "outlook" ? "/api/outlook/inbox" : "/api/mailcom/inbox"
       const res = await fetch(
-        `/api/mailcom/inbox?email=${encodeURIComponent(inboxEmail)}&mailId=${mailId}`,
+        `${inboxApi}?email=${encodeURIComponent(inboxEmail)}&mailId=${mailId}`,
         { headers: { "X-API-Key": getKey() } }
       )
       const d = await res.json()
@@ -1460,7 +1462,7 @@ export default function ResourcePage({ resource, title }: Props) {
                           : row[col.key] ?? "—"}
                       </td>
                     ))}
-                    {resource === "mailcom" && (
+                    {(resource === "mailcom" || resource === "outlook") && (
                       <td className="px-4 py-3 whitespace-nowrap">
                         <button
                           onClick={() => openInbox(row.email)}
