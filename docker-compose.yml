@@ -3,6 +3,8 @@ services:
     build: .
     ports:
       - "3203:3203"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/app/data
     environment:
@@ -11,4 +13,5 @@ services:
       - DB_PATH=/app/data/z-manage.sqlite
       - AICARD_API_KEY=ak_live_1bjad0qZmUrnsEmXY0csIL9HWdTu9qkC
       - AICARD_CUSTOMER_ID=cus_e3cb4482c3d7139e41819997
+      - PROTOCOL_SERVER_URL=http://host.docker.internal:9876
     restart: unless-stopped
