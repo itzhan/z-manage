@@ -27,19 +27,23 @@ export default function ProtocolPage() {
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState("")
   const [results, setResults] = useState<Array<{ email: string; success: boolean; key?: string; error?: string }>>([])
+  const [workers, setWorkers] = useState<any[]>([])
 
   const hdrs = () => ({ "X-API-Key": getKey(), "Content-Type": "application/json" })
 
   const load = useCallback(async () => {
-    const [s, b, t] = await Promise.all([
+    const [s, b, t, w] = await Promise.all([
       fetch("/api/stats", { headers: hdrs() }).then(r => r.json()),
       fetch(`/api/brands?platform=claudePlatform`, { headers: hdrs() }).then(r => r.json()),
       fetch(`/api/dispatch?pageSize=30&page=${tasksPage}&action=claude-protocol`, { headers: hdrs() }).then(r => r.json()),
+      fetch("/api/workers", { headers: hdrs() }).then(r => r.json()),
     ])
     setStats(s)
     setBrands(b.details || [])
     setTasks(t.tasks || [])
     setTasksTotal(t.total || 0)
+    const pw = Array.isArray(w) ? w.filter((x: any) => x.capabilities?.includes("claude-protocol")) : []
+    setWorkers(pw)
   }, [tasksPage])
 
   useEffect(() => { load() }, [load])
@@ -109,6 +113,28 @@ export default function ProtocolPage() {
           <RefreshCw className="h-3.5 w-3.5 mr-1.5" />刷新
         </Button>
       </div>
+
+      {/* Protocol Workers */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">协议节点 <Badge variant="secondary">{workers.filter(w => w.status === "online").length}/{workers.length}</Badge></CardTitle>
+        </CardHeader>
+        <CardContent>
+          {workers.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">暂无协议节点</p>
+          ) : (
+            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-2">
+              {workers.map((w: any) => (
+                <div key={w.id} className={`border rounded-md px-3 py-2 text-xs ${w.status === "online" ? "border-green-500/30 bg-green-500/5" : w.status === "disabled" ? "opacity-40" : "border-border"}`}>
+                  <div className="font-medium truncate">{w.name}</div>
+                  <div className="text-muted-foreground truncate">{w.baseUrl?.replace("http://", "").replace(":9876", "")}</div>
+                  <Badge variant={w.status === "online" ? "default" : "secondary"} className="text-[9px] mt-1">{w.status}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Dispatch Form */}
       <Card>
