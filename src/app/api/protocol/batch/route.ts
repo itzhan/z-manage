@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb, logAllocation } from '@/lib/db';
 import { auth } from '@/lib/auth';
 
-const PROTOCOL_SERVER = process.env.PROTOCOL_SERVER_URL || 'http://host.docker.internal:9876';
+const FALLBACK_SERVER = process.env.PROTOCOL_SERVER_URL || 'http://host.docker.internal:9876';
 
 export async function POST(req: NextRequest) {
   const a = auth(req);
@@ -79,18 +79,25 @@ export async function POST(req: NextRequest) {
 
         send({ type: 'batch_resources', batch: batchIdx + 1, count: tasks.length });
 
-        // Execute tasks with concurrency via protocol server
-        const CONCURRENCY = 3;
+        // Get protocol workers
+        const protocolWorkers = db.prepare("SELECT * FROM workers WHERE status = 'online' AND capabilities LIKE '%claude-protocol%'").all() as any[];
+        const workerUrls = protocolWorkers.length > 0 ? protocolWorkers.map(w => ({ url: w.baseUrl, name: w.name })) : [{ url: FALLBACK_SERVER, name: 'local' }];
+
+        // Execute tasks — distribute across workers, each worker handles concurrency internally
+        const CONCURRENCY = Math.min(workerUrls.length * 3, tasks.length);
         let idx = 0;
+        let workerIdx = 0;
 
         const runOne = async () => {
           while (idx < tasks.length) {
             const i = idx++;
+            const wi = workerIdx++ % workerUrls.length;
+            const worker = workerUrls[wi];
             const t = tasks[i];
             const proxyUrl = `http://${t.proxy.user}:${t.proxy.pass}@${t.proxy.host}:${t.proxy.port}`;
 
             db.prepare('UPDATE dispatch_tasks SET status = ?, dispatchedAt = ? WHERE id = ?').run('running', new Date().toISOString(), t.taskId);
-            send({ type: 'task_start', batch: batchIdx + 1, taskIdx: i + 1, total: tasks.length, email: t.email.email });
+            send({ type: 'task_start', batch: batchIdx + 1, taskIdx: i + 1, total: tasks.length, email: t.email.email, worker: worker.name });
 
             const reqBody: Record<string, string> = {
               email: t.email.email,
@@ -115,7 +122,7 @@ export async function POST(req: NextRequest) {
             try {
               const ctrl = new AbortController();
               const timer = setTimeout(() => ctrl.abort(), 660000);
-              const resp = await fetch(`${PROTOCOL_SERVER}/run`, {
+              const resp = await fetch(`${worker.url}/run`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(reqBody),
