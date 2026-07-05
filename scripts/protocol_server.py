@@ -1,6 +1,7 @@
-"""协议执行器 HTTP 服务 - 在宿主机上运行"""
+"""协议执行器 HTTP 服务 - 在宿主机上运行（多线程）"""
 import json, sys, threading, traceback
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -59,4 +60,6 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else PORT
     print(f"Protocol server listening on :{port}")
-    HTTPServer(("0.0.0.0", port), Handler).serve_forever()
+    class ThreadedServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+    ThreadedServer(("0.0.0.0", port), Handler).serve_forever()
