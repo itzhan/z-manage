@@ -82,7 +82,8 @@ export async function POST(req: NextRequest) {
   }
 
   // 构建 callbackUrl — worker 成功后回报到此
-  const masterUrl = `${req.nextUrl.protocol}//${req.nextUrl.host}`;
+  // Docker 内 req.nextUrl.host 可能是容器内部地址，用外网地址
+  const masterUrl = process.env.PUBLIC_URL || `${req.nextUrl.protocol}//${req.nextUrl.host}`;
   const apiKey = req.headers.get('x-api-key') || req.nextUrl.searchParams.get('_key') || '';
   const callbackUrl = `${masterUrl}/api/mail-workers/report?_key=${apiKey}`;
 

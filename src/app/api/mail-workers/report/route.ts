@@ -19,8 +19,8 @@ export async function POST(req: NextRequest) {
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO mailcom_accounts (id, email, password, used, banned, source, tokenStatus, addedAt)
-    VALUES (?, ?, ?, 0, 0, ?, 'pending', ?)
+    INSERT INTO mailcom_accounts (id, email, password, banned, tokenStatus, addedAt)
+    VALUES (?, ?, ?, 0, 'pending', ?)
     ON CONFLICT(email) DO NOTHING
   `);
 
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
       if (!item.email || !item.password) continue;
       const email = item.email.trim().toLowerCase();
       const id = `mc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      const info = stmt.run(id, email, item.password.trim(), source, now);
+      const info = stmt.run(id, email, item.password.trim(), now);
       if (info.changes > 0) added++;
     }
   });
