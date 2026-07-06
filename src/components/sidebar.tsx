@@ -17,6 +17,7 @@ import {
   Server,
   Database,
   MapPin,
+  Zap,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -27,6 +28,7 @@ const NAV_GROUPS = [
       { href: "/", label: "概览", icon: LayoutDashboard },
       { href: "/workers", label: "Worker调度", icon: Server },
       { href: "/protocol", label: "Claude协议", icon: Key },
+      { href: "/mailreg", label: "Mail注册", icon: Zap },
     ],
   },
   {
