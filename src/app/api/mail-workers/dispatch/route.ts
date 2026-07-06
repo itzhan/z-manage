@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
       const res = await fetch(`http://${w.host}:${w.port}/task/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ taskId, target, threads, proxies, callbackUrl }),
+        body: JSON.stringify({ taskId, target, threads, proxies: [], callbackUrl }),
         signal: ctrl.signal,
       });
       clearTimeout(timer);
