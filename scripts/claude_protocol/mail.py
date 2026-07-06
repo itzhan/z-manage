@@ -410,34 +410,54 @@ class OutlookClient:
 
 def poll_magic_link_mailcom(email: str, password: str,
                             max_wait: int = 120, interval: int = 5,
-                            after_ts: float = 0) -> str:
-    """轮询 mail.com 收件箱获取 Claude magic link。
-    after_ts: 只取该时间戳(epoch秒)之后的邮件，避免取到旧的。
-    """
+                            after_ts: float = 0,
+                            master_url: str = "", master_api_key: str = "") -> str:
+    """轮询获取 Claude magic link。优先走 z-manage API，失败回退直连 mail.com。"""
     if after_ts <= 0:
         after_ts = time.time() - 10
-    seen_links: set = set()
-    mc = MailComClient(email, password)
     import logging
     log = logging.getLogger(__name__)
+
     for attempt in range(max_wait // interval):
         try:
-            mc.login()
-            mails = mc.list_incoming(10)
-            for m in mails[:10]:
-                # date 是 epoch 毫秒
-                mail_ts = m.date / 1000 if m.date > 1e12 else m.date
-                if mail_ts < after_ts:
-                    continue
-                if "anthropic" not in m.from_addr.lower() and "claude" not in m.subject.lower():
-                    continue
-                body = mc.get_body(m.id)
-                link = MAGIC_LINK_RE.search(body)
-                if link and link.group(0) not in seen_links:
-                    return link.group(0)
+            # 优先走 z-manage API（已缓存 token，不触发 mail.com 风控）
+            if master_url and master_api_key:
+                import urllib.request
+                url = f"{master_url}/api/mailcom/inbox?email={urllib.parse.quote(email)}"
+                req = urllib.request.Request(url, headers={"X-API-Key": master_api_key})
+                resp = json.loads(urllib.request.urlopen(req, timeout=20).read())
+                for m in resp.get("mails", []):
+                    subj = m.get("subject", "")
+                    from_addr = m.get("from", "")
+                    if "anthropic" not in from_addr.lower() and "claude" not in subj.lower():
+                        continue
+                    mail_id = m.get("id", "")
+                    if not mail_id:
+                        continue
+                    url2 = f"{master_url}/api/mailcom/inbox?email={urllib.parse.quote(email)}&mailId={urllib.parse.quote(mail_id)}"
+                    req2 = urllib.request.Request(url2, headers={"X-API-Key": master_api_key})
+                    body = json.loads(urllib.request.urlopen(req2, timeout=20).read()).get("body", "")
+                    link = MAGIC_LINK_RE.search(body)
+                    if link:
+                        return link.group(0)
+            else:
+                # 回退：直连 mail.com OAuth
+                mc = MailComClient(email, password)
+                mc.login()
+                mails = mc.list_incoming(10)
+                for m in mails[:10]:
+                    mail_ts = m.date / 1000 if m.date > 1e12 else m.date
+                    if mail_ts < after_ts:
+                        continue
+                    if "anthropic" not in m.from_addr.lower() and "claude" not in m.subject.lower():
+                        continue
+                    body = mc.get_body(m.id)
+                    link = MAGIC_LINK_RE.search(body)
+                    if link:
+                        return link.group(0)
         except Exception as e:
             if attempt < 3:
-                log.warning("[mail] mail.com 登录/读信异常（重试 %d）: %s", attempt + 1, e)
+                log.warning("[mail] 读邮件异常（重试 %d）: %s", attempt + 1, e)
         time.sleep(interval if attempt > 2 else 8)
     return ""
 

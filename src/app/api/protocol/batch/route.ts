@@ -17,7 +17,11 @@ export async function POST(req: NextRequest) {
   const now = new Date().toISOString();
   const batchSize = rawBatchSize && rawBatchSize > 0 ? rawBatchSize : count;
   const apiKey = req.headers.get('x-api-key') || '';
-  const masterUrl = `${req.nextUrl.protocol}//${req.nextUrl.host}`;
+  let masterUrl = `${req.nextUrl.protocol}//${req.nextUrl.host}`;
+  // Ensure masterUrl is externally accessible (not localhost/container internal)
+  if (masterUrl.includes('localhost') || masterUrl.includes('127.0.0.1')) {
+    masterUrl = 'http://38.34.191.113:3203';
+  }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({

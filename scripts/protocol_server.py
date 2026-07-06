@@ -41,6 +41,8 @@ class Handler(BaseHTTPRequestHandler):
                 proxy=body.get("proxy", ""),
                 key_name=body.get("key_name", "auto-key"),
                 yescaptcha_key=body.get("yescaptcha_key", ""),
+                master_url=body.get("master_url", ""),
+                master_api_key=body.get("master_api_key", ""),
             )
 
             result = run_console_flow(args)

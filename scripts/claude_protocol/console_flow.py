@@ -38,6 +38,8 @@ class ConsoleArgs:
     proxy: str = ""
     key_name: str = "auto-key"
     yescaptcha_key: str = ""
+    master_url: str = ""
+    master_api_key: str = ""
 
 
 @dataclass
@@ -73,7 +75,7 @@ def run_console_flow(args: ConsoleArgs) -> FlowResult:
                 args.outlook_client_id, args.outlook_refresh_token,
                 max_wait=120, interval=5, after_ts=_magic_link_sent_at,
             )
-        return poll_magic_link_mailcom(args.email, args.password, max_wait=120, interval=5, after_ts=_magic_link_sent_at)
+        return poll_magic_link_mailcom(args.email, args.password, max_wait=120, interval=5, after_ts=_magic_link_sent_at, master_url=args.master_url, master_api_key=args.master_api_key)
 
     try:
         login_result = login.login(args.email, get_magic_link)
