@@ -16,12 +16,15 @@ export async function GET(req: NextRequest) {
   if (status === 'available') { conditions.push("banned = 0 AND allocatedTo IS NULL AND tokenStatus = 'ok'"); }
   else if (status === 'banned') { conditions.push('banned = 1'); }
   else if (status === 'failed') { conditions.push("tokenStatus = 'failed'"); }
+  else if (status === 'pending') { conditions.push("tokenStatus = 'pending'"); }
+  else if (status === 'used') { conditions.push("allocatedTo IS NOT NULL"); }
+  else if (status === 'allocated') { conditions.push("allocatedTo IS NOT NULL"); }
   if (allocatedTo) { conditions.push('allocatedTo = ?'); params.push(allocatedTo); }
   const search = req.nextUrl.searchParams.get('search');
   if (search) { conditions.push('email LIKE ?'); params.push(`%${search}%`); }
   const where = conditions.length ? conditions.join(' AND ') : '1=1';
   const total = (db.prepare(`SELECT COUNT(*) as c FROM mailcom_accounts WHERE ${where}`).get(...params) as any).c;
-  const data = db.prepare(`SELECT * FROM mailcom_accounts WHERE ${where} ORDER BY addedAt DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+  const data = db.prepare(`SELECT * FROM mailcom_accounts WHERE ${where} ORDER BY CASE WHEN banned = 0 AND allocatedTo IS NULL AND tokenStatus = 'ok' THEN 0 WHEN tokenStatus = 'ok' THEN 1 WHEN tokenStatus = 'pending' THEN 2 ELSE 3 END, addedAt DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
   return NextResponse.json({ data, total, page, limit });
 }
 

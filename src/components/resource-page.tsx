@@ -1266,6 +1266,8 @@ export default function ResourcePage({ resource, title }: Props) {
             {resource === "cards" && <option value="disabled">disabled</option>}
             {resource === "cards" && <option value="exhausted">exhausted</option>}
             {resource === "mailcom" && <option value="banned">被封</option>}
+            {resource === "mailcom" && <option value="failed">Token失败</option>}
+            {resource === "mailcom" && <option value="pending">等待Token</option>}
           </select>
           {resource === "cards" && brands.length > 0 && (
             <select

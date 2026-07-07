@@ -1,7 +1,10 @@
 import { NextRequest } from 'next/server';
 import { getDb } from '@/lib/db';
 import { auth } from '@/lib/auth';
-import { ProxyAgent, fetch as undiciFetch } from 'undici';
+// @ts-ignore
+import nodeFetch from 'node-fetch';
+import { SocksProxyAgent } from 'socks-proxy-agent';
+import { ProxyAgent as HttpProxyAgent, fetch as undiciFetch } from 'undici';
 
 export async function POST(req: NextRequest) {
   const a = auth(req);
@@ -14,7 +17,7 @@ export async function POST(req: NextRequest) {
     const placeholders = emails.map(() => '?').join(',');
     rows = db.prepare(`SELECT email, password FROM mailcom_accounts WHERE email IN (${placeholders})`).all(...emails) as any[];
   } else {
-    rows = db.prepare(`SELECT email, password FROM mailcom_accounts WHERE tokenStatus = 'failed' OR (tokenStatus = 'ok' AND accessToken IS NULL)`).all() as any[];
+    rows = db.prepare(`SELECT email, password FROM mailcom_accounts WHERE tokenStatus = 'pending' OR tokenStatus = 'failed' OR (tokenStatus = 'ok' AND accessToken IS NULL)`).all() as any[];
   }
 
   if (rows.length === 0) {
@@ -46,7 +49,6 @@ export async function POST(req: NextRequest) {
 
       const getProxyFetch = () => {
         if (proxies.length === 0) return undefined;
-        // 找使用次数最少的代理
         let bestIdx = Math.floor(Math.random() * proxies.length);
         let bestCount = proxyUsage.get(bestIdx) ?? 0;
         for (let i = 0; i < 5; i++) {
@@ -55,7 +57,6 @@ export async function POST(req: NextRequest) {
           if (rc < bestCount) { bestIdx = ri; bestCount = rc; }
         }
         if (bestCount >= PER_PROXY) {
-          // 所有随机采样的都满了，找一个真正最小的
           let minIdx = 0, minCount = proxyUsage.get(0) ?? 0;
           for (let i = 1; i < proxies.length; i++) {
             const c = proxyUsage.get(i) ?? 0;
@@ -65,8 +66,13 @@ export async function POST(req: NextRequest) {
         }
         proxyUsage.set(bestIdx, (proxyUsage.get(bestIdx) ?? 0) + 1);
         const p = proxies[bestIdx];
+        const pool = (p as any).pool || 'static';
+        if (pool === 'socks5' || parseInt(p.port) === 5782) {
+          const agent = new SocksProxyAgent(`socks5://${p.user}:${p.pass}@${p.host}:${p.port}`);
+          return (url: any, init: any) => nodeFetch(url, { ...init, agent });
+        }
         const proxyUrl = `http://${p.user}:${p.pass}@${p.host}:${p.port}`;
-        const agent = new ProxyAgent(proxyUrl);
+        const agent = new HttpProxyAgent(proxyUrl);
         return (url: any, init: any) => undiciFetch(url, { ...init, dispatcher: agent });
       };
 

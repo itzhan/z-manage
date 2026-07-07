@@ -13,6 +13,7 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/src/mailcom-sdk ./src/mailcom-sdk
+RUN npm install undici socks-proxy-agent node-fetch@2
 EXPOSE 3203
 ENV PORT=3203
 CMD ["node", "server.js"]
