@@ -1,8 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb, logAllocation } from '@/lib/db';
+import { getDb } from '@/lib/db';
 import { auth } from '@/lib/auth';
 
-// POST: Worker 上报注册成功的 mail.com 账号
+function ensureTable() {
+  const db = getDb();
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS mail_staging (
+      id        TEXT PRIMARY KEY,
+      email     TEXT NOT NULL UNIQUE,
+      password  TEXT NOT NULL,
+      source    TEXT DEFAULT 'worker',
+      createdAt TEXT NOT NULL
+    )
+  `);
+  return db;
+}
+
+// POST: Worker 上报注册成功的账号 → 写入暂存区（不直接入库 mailcom）
 export async function POST(req: NextRequest) {
   const a = auth(req);
   if (!a.ok) return a.error!;
@@ -15,12 +29,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'empty batch' }, { status: 400 });
   }
 
-  const db = getDb();
+  const db = ensureTable();
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO mailcom_accounts (id, email, password, banned, tokenStatus, addedAt)
-    VALUES (?, ?, ?, 0, 'pending', ?)
+    INSERT INTO mail_staging (id, email, password, source, createdAt)
+    VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(email) DO NOTHING
   `);
 
@@ -29,17 +43,13 @@ export async function POST(req: NextRequest) {
     for (const item of batch) {
       if (!item.email || !item.password) continue;
       const email = item.email.trim().toLowerCase();
-      const id = `mc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      const info = stmt.run(id, email, item.password.trim(), now);
+      const id = `ms_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const info = stmt.run(id, email, item.password.trim(), source, now);
       if (info.changes > 0) added++;
     }
   });
   tx();
 
-  if (added > 0) {
-    logAllocation(db, 'mailcom', 'worker-report', source, added, { emails: batch.map((b) => b.email) });
-  }
-
-  const total = (db.prepare('SELECT COUNT(*) as c FROM mailcom_accounts').get() as any).c;
+  const total = (db.prepare('SELECT COUNT(*) as c FROM mail_staging').get() as any).c;
   return NextResponse.json({ added, total }, { status: 201 });
 }

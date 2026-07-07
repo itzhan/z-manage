@@ -20,6 +20,11 @@ import {
   Plus,
   Trash2,
   Globe,
+  Upload,
+  Mail,
+  ChevronLeft,
+  ChevronRight,
+  CheckSquare,
 } from "lucide-react"
 
 function getKey() {
@@ -48,6 +53,14 @@ export default function MailRegPage() {
   const [addPort, setAddPort] = useState("8098")
   const [addMax, setAddMax] = useState("10")
 
+  // Staging (暂存区)
+  const [staging, setStaging] = useState<any[]>([])
+  const [stagingTotal, setStagingTotal] = useState(0)
+  const [stagingPage, setStagingPage] = useState(1)
+  const STAGING_LIMIT = 50
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [importing, setImporting] = useState(false)
+
   const load = useCallback(async () => {
     try {
       const r = await fetch("/api/mail-workers", { headers: hdrs() })
@@ -58,11 +71,21 @@ export default function MailRegPage() {
     setLoading(false)
   }, [])
 
+  const loadStaging = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/mail-workers/staging?page=${stagingPage}&limit=${STAGING_LIMIT}`, { headers: hdrs() })
+      const d = await r.json()
+      setStaging(d.data ?? [])
+      setStagingTotal(d.total ?? 0)
+    } catch {}
+  }, [stagingPage])
+
   useEffect(() => {
     load()
-    const iv = setInterval(load, 5000)
+    loadStaging()
+    const iv = setInterval(() => { load(); loadStaging() }, 5000)
     return () => clearInterval(iv)
-  }, [load])
+  }, [load, loadStaging])
 
   const anyRunning = workers.some((w) => w.task?.running)
   const totalOk = workers.reduce((s: number, w: any) => s + (w.task?.ok ?? 0), 0)
@@ -134,6 +157,10 @@ export default function MailRegPage() {
       { id: "pw-7", name: "雨云7", host: "199.68.217.57", port: 8098, maxThreads: 10 },
       { id: "pw-8", name: "雨云8", host: "64.83.1.103", port: 8098, maxThreads: 10 },
       { id: "pw-9", name: "雨云9", host: "64.83.1.49", port: 8098, maxThreads: 10 },
+      { id: "pw-10", name: "雨云10", host: "199.68.217.39", port: 8098, maxThreads: 10 },
+      { id: "pw-11", name: "雨云11", host: "154.40.47.22", port: 8098, maxThreads: 10 },
+      { id: "pw-12", name: "雨云12", host: "38.92.15.148", port: 8098, maxThreads: 10 },
+      { id: "pw-13", name: "雨云13", host: "199.68.217.245", port: 8098, maxThreads: 10 },
     ]
     await fetch("/api/mail-workers", {
       method: "POST",
@@ -143,6 +170,70 @@ export default function MailRegPage() {
     load()
   }
 
+  // 暂存区操作
+  const doImportAll = async () => {
+    setImporting(true)
+    try {
+      const r = await fetch("/api/mail-workers/staging", {
+        method: "POST",
+        headers: hdrs(),
+        body: JSON.stringify({}),
+      })
+      const d = await r.json()
+      alert(`已导入 ${d.imported} 个邮箱到 Mail.com 邮箱池`)
+      setSelectedIds(new Set())
+      loadStaging()
+    } catch {}
+    setImporting(false)
+  }
+
+  const doImportSelected = async () => {
+    if (selectedIds.size === 0) return
+    setImporting(true)
+    try {
+      const r = await fetch("/api/mail-workers/staging", {
+        method: "POST",
+        headers: hdrs(),
+        body: JSON.stringify({ ids: Array.from(selectedIds) }),
+      })
+      const d = await r.json()
+      alert(`已导入 ${d.imported} 个邮箱到 Mail.com 邮箱池`)
+      setSelectedIds(new Set())
+      loadStaging()
+    } catch {}
+    setImporting(false)
+  }
+
+  const doDeleteSelected = async () => {
+    if (selectedIds.size === 0) return
+    if (!confirm(`确定删除 ${selectedIds.size} 个邮箱？`)) return
+    await fetch("/api/mail-workers/staging", {
+      method: "DELETE",
+      headers: hdrs(),
+      body: JSON.stringify({ ids: Array.from(selectedIds) }),
+    })
+    setSelectedIds(new Set())
+    loadStaging()
+  }
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === staging.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(staging.map((s) => s.id)))
+    }
+  }
+
+  const totalPages = Math.ceil(stagingTotal / STAGING_LIMIT)
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -151,11 +242,11 @@ export default function MailRegPage() {
             <Zap className="h-5 w-5" />Mail.com 注册机
           </h1>
           <p className="text-sm text-muted-foreground">
-            分布式 mail.com 邮箱注册，产出自动入库到邮箱池
+            分布式 mail.com 邮箱注册，产出暂存后人工确认导入
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={load}>
+          <Button variant="outline" size="sm" onClick={() => { load(); loadStaging() }}>
             <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? "animate-spin" : ""}`} />刷新
           </Button>
         </div>
@@ -191,8 +282,8 @@ export default function MailRegPage() {
         </Card>
         <Card>
           <CardContent className="p-4 flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">目标</span>
-            <span className="text-2xl font-bold">{totalTarget || "—"}</span>
+            <span className="text-xs text-muted-foreground flex items-center gap-1"><Mail className="h-3 w-3" />待导入</span>
+            <span className="text-2xl font-bold text-amber-500">{stagingTotal}</span>
           </CardContent>
         </Card>
       </div>
@@ -240,7 +331,6 @@ export default function MailRegPage() {
             </div>
           </div>
 
-          {/* 总进度条 */}
           {totalTarget > 0 && (
             <div className="mt-3">
               <div className="flex justify-between text-xs text-muted-foreground mb-1">
@@ -248,15 +338,12 @@ export default function MailRegPage() {
                 <span>{totalOk}/{totalTarget} ({(totalOk / Math.max(totalTarget, 1) * 100).toFixed(0)}%)</span>
               </div>
               <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-emerald-500 rounded-full transition-all"
-                  style={{ width: `${Math.min(100, totalOk / Math.max(totalTarget, 1) * 100)}%` }}
-                />
+                <div className="h-full bg-emerald-500 rounded-full transition-all"
+                  style={{ width: `${Math.min(100, totalOk / Math.max(totalTarget, 1) * 100)}%` }} />
               </div>
             </div>
           )}
 
-          {/* 派活结果提示 */}
           {dispatchResult && (
             <div className={`mt-3 text-xs p-2 rounded ${dispatchResult.error ? "bg-destructive/10 text-destructive" : "bg-emerald-500/10 text-emerald-700"}`}>
               {dispatchResult.error ? (
@@ -265,13 +352,108 @@ export default function MailRegPage() {
                 <span>
                   已派发 {dispatchResult.assigned}/{workers.length} 台 Worker，代理池 {dispatchResult.proxyCount} 个
                   {dispatchResult.errors?.length > 0 && (
-                    <span className="block mt-1 text-amber-600">
-                      {dispatchResult.errors.join(" · ")}
-                    </span>
+                    <span className="block mt-1 text-amber-600">{dispatchResult.errors.join(" · ")}</span>
                   )}
                 </span>
               )}
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 注册产出 — 暂存区列表 */}
+      <Card>
+        <CardHeader className="p-4 pb-2">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Mail className="h-4 w-4" />注册产出
+              {stagingTotal > 0 && (
+                <Badge variant="secondary" className="text-xs">{stagingTotal} 个待导入</Badge>
+              )}
+            </CardTitle>
+            <div className="flex gap-2">
+              {selectedIds.size > 0 && (
+                <>
+                  <Button variant="outline" size="sm" onClick={doDeleteSelected}>
+                    <Trash2 className="h-3.5 w-3.5 mr-1" />删除 ({selectedIds.size})
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={doImportSelected} disabled={importing}>
+                    <Upload className="h-3.5 w-3.5 mr-1" />导入选中 ({selectedIds.size})
+                  </Button>
+                </>
+              )}
+              <Button size="sm" onClick={doImportAll} disabled={importing || stagingTotal === 0}>
+                {importing ? (
+                  <><RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" />导入中</>
+                ) : (
+                  <><Upload className="h-3.5 w-3.5 mr-1.5" />一键全部导入到 Mail.com</>
+                )}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-4 pt-0">
+          {staging.length > 0 ? (
+            <>
+              <div className="border rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/50 border-b">
+                      <th className="p-2 w-10 text-center">
+                        <button onClick={toggleSelectAll} className="p-0.5 rounded hover:bg-accent" title="全选">
+                          <CheckSquare className={`h-4 w-4 ${selectedIds.size === staging.length ? "text-primary" : "text-muted-foreground"}`} />
+                        </button>
+                      </th>
+                      <th className="p-2 text-left text-xs font-medium text-muted-foreground">邮箱</th>
+                      <th className="p-2 text-left text-xs font-medium text-muted-foreground">密码</th>
+                      <th className="p-2 text-left text-xs font-medium text-muted-foreground">来源</th>
+                      <th className="p-2 text-left text-xs font-medium text-muted-foreground">注册时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {staging.map((item) => (
+                      <tr key={item.id} className={`border-b last:border-0 hover:bg-muted/30 ${selectedIds.has(item.id) ? "bg-primary/5" : ""}`}>
+                        <td className="p-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(item.id)}
+                            onChange={() => toggleSelect(item.id)}
+                            className="rounded"
+                          />
+                        </td>
+                        <td className="p-2 font-mono text-xs">{item.email}</td>
+                        <td className="p-2 font-mono text-xs text-muted-foreground">{item.password}</td>
+                        <td className="p-2 text-xs text-muted-foreground">{item.source}</td>
+                        <td className="p-2 text-xs text-muted-foreground">{item.createdAt?.slice(0, 16).replace("T", " ")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* 分页 */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between mt-3">
+                  <span className="text-xs text-muted-foreground">
+                    第 {stagingPage}/{totalPages} 页，共 {stagingTotal} 条
+                  </span>
+                  <div className="flex gap-1">
+                    <Button variant="outline" size="sm" disabled={stagingPage <= 1}
+                      onClick={() => setStagingPage((p) => Math.max(1, p - 1))}>
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={stagingPage >= totalPages}
+                      onClick={() => setStagingPage((p) => p + 1)}>
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="text-center text-sm text-muted-foreground py-8">
+              暂无新注册邮箱，派活后产出会显示在这里
+            </p>
           )}
         </CardContent>
       </Card>
@@ -286,7 +468,7 @@ export default function MailRegPage() {
             <div className="flex gap-2">
               {workers.length === 0 && (
                 <Button variant="outline" size="sm" onClick={initDefaultWorkers}>
-                  导入 9 台雨云
+                  导入 13 台雨云
                 </Button>
               )}
               <Button variant="outline" size="sm" onClick={() => setShowAdd(true)}>
@@ -298,83 +480,49 @@ export default function MailRegPage() {
         <CardContent className="p-4 pt-0">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {workers.map((w: any) => (
-              <div
-                key={w.id}
-                className={`rounded-xl border p-3 space-y-2 transition-colors ${
-                  w.online
-                    ? w.task?.running
-                      ? "border-emerald-500/50 bg-emerald-500/[0.02]"
-                      : "border-border"
-                    : "border-destructive/30 opacity-60"
-                }`}
-              >
+              <div key={w.id} className={`rounded-xl border p-3 space-y-2 transition-colors ${
+                w.online ? w.task?.running ? "border-emerald-500/50 bg-emerald-500/[0.02]" : "border-border" : "border-destructive/30 opacity-60"
+              }`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span
-                      className={`h-2 w-2 rounded-full shrink-0 ${
-                        w.online
-                          ? w.task?.running
-                            ? "bg-emerald-500 animate-pulse"
-                            : "bg-emerald-500"
-                          : "bg-red-500"
-                      }`}
-                    />
+                    <span className={`h-2 w-2 rounded-full shrink-0 ${
+                      w.online ? w.task?.running ? "bg-emerald-500 animate-pulse" : "bg-emerald-500" : "bg-red-500"
+                    }`} />
                     <span className="text-sm font-medium">{w.name}</span>
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                      {w.id}
-                    </Badge>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">{w.id}</Badge>
                   </div>
                   <div className="flex items-center gap-1">
                     <span className="text-[10px] text-muted-foreground font-mono">{w.host}:{w.port}</span>
-                    <button
-                      onClick={() => removeWorker(w.id)}
-                      className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                      title="删除"
-                    >
+                    <button onClick={() => removeWorker(w.id)} className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors" title="删除">
                       <Trash2 className="h-3 w-3" />
                     </button>
                   </div>
                 </div>
-
                 {w.task ? (
                   <>
                     <div className="flex justify-between text-xs">
                       <span className="text-muted-foreground">进度</span>
                       <span>
                         <span className="text-emerald-600 font-medium">{w.task.ok}</span>
-                        <span className="text-muted-foreground"> / {w.task.target}</span>
-                        <span className="text-muted-foreground ml-1">({w.task.fail} 失败)</span>
+                        <span className="text-muted-foreground"> / {w.task.target} ({w.task.fail} 失败)</span>
                       </span>
                     </div>
                     <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-emerald-500 rounded-full transition-all"
-                        style={{
-                          width: `${Math.min(100, (w.task.ok / Math.max(w.task.target, 1)) * 100)}%`,
-                        }}
-                      />
+                      <div className="h-full bg-emerald-500 rounded-full transition-all"
+                        style={{ width: `${Math.min(100, (w.task.ok / Math.max(w.task.target, 1)) * 100)}%` }} />
                     </div>
                     <div className="flex justify-between text-[10px] text-muted-foreground">
                       <span>
-                        {w.task.running ? (
-                          <Badge variant="warning" className="text-[10px] px-1 py-0">运行中</Badge>
-                        ) : (
-                          <Badge variant="secondary" className="text-[10px] px-1 py-0">已完成</Badge>
-                        )}
+                        {w.task.running ? <Badge variant="warning" className="text-[10px] px-1 py-0">运行中</Badge>
+                          : <Badge variant="secondary" className="text-[10px] px-1 py-0">已完成</Badge>}
                         <span className="ml-1">{w.task.threads} 并发</span>
-                        {w.task.elapsed > 0 && <span className="ml-1">· {Math.floor(w.task.elapsed / 60)}m{w.task.elapsed % 60}s</span>}
                       </span>
-                      {w.task.lastAccount && (
-                        <span className="font-mono truncate max-w-[160px]" title={w.task.lastAccount}>
-                          {w.task.lastAccount}
-                        </span>
-                      )}
+                      {w.task.lastAccount && <span className="font-mono truncate max-w-[160px]" title={w.task.lastAccount}>{w.task.lastAccount}</span>}
                     </div>
                   </>
                 ) : (
                   <p className="text-xs text-muted-foreground">{w.online ? "空闲" : "离线"}</p>
                 )}
-
                 {w.system?.cpu != null && (
                   <div className="flex gap-3 text-[10px] text-muted-foreground">
                     <span>CPU {w.system.cpu}%</span>
@@ -384,10 +532,9 @@ export default function MailRegPage() {
               </div>
             ))}
           </div>
-
           {workers.length === 0 && (
             <p className="text-center text-sm text-muted-foreground py-8">
-              暂无 Worker，点击"导入 9 台雨云"或手动添加
+              暂无 Worker，点击"导入 13 台雨云"或手动添加
             </p>
           )}
         </CardContent>
