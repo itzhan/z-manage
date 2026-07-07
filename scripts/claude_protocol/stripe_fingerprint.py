@@ -41,13 +41,14 @@ import base64
 import hashlib
 import json
 import logging
+import os
 import random
 import re
 import struct
 import time
 import urllib.parse
 import zlib
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Optional, Tuple
 
 log = logging.getLogger(__name__)
@@ -71,33 +72,29 @@ SCREEN_PROFILES = [
     {"resolution": "2560,1600", "available": "2560,1505", "colorDepth": 30, "pixelRatio": 2},
     {"resolution": "1728,1117", "available": "1728,1055", "colorDepth": 30, "pixelRatio": 2},
     {"resolution": "1512,982", "available": "1512,918", "colorDepth": 30, "pixelRatio": 2},
-    {"resolution": "1440,900", "available": "1440,831", "colorDepth": 24, "pixelRatio": 2},
-    {"resolution": "1680,1050", "available": "1680,981", "colorDepth": 24, "pixelRatio": 2},
-    {"resolution": "2880,1800", "available": "2880,1705", "colorDepth": 30, "pixelRatio": 2},
-    {"resolution": "3024,1964", "available": "3024,1895", "colorDepth": 30, "pixelRatio": 2},
-    {"resolution": "3456,2234", "available": "3456,2169", "colorDepth": 30, "pixelRatio": 2},
-    {"resolution": "1792,1120", "available": "1792,1055", "colorDepth": 30, "pixelRatio": 2},
-    {"resolution": "2048,1152", "available": "2048,1083", "colorDepth": 24, "pixelRatio": 2},
-    {"resolution": "1470,956", "available": "1470,893", "colorDepth": 30, "pixelRatio": 2},
-    {"resolution": "1800,1169", "available": "1800,1105", "colorDepth": 30, "pixelRatio": 2},
-    {"resolution": "2056,1329", "available": "2056,1265", "colorDepth": 30, "pixelRatio": 2},
 ]
 
 GPU_PROFILES = [
-    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
-    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
-    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
-    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
-    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
-    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
-    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
-    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
-    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
-    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Max, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
-    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Max, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
-    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Max, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
-    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Ultra, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
-    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Ultra, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
+    {
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version)",
+        "vendor": "Google Inc. (Apple)",
+    },
+    {
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)",
+        "vendor": "Google Inc. (Apple)",
+    },
+    {
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)",
+        "vendor": "Google Inc. (Apple)",
+    },
+    {
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+        "vendor": "Google Inc. (Apple)",
+    },
+    {
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)",
+        "vendor": "Google Inc. (Apple)",
+    },
 ]
 
 # out-4.5.45.js 内的 fontsToDetect 顺序（55 项），FontsExtractor 输出为每项
@@ -142,20 +139,11 @@ HARDWARE_PROFILES = [
     {"memory": 16, "concurrency": 8},
     {"memory": 32, "concurrency": 12},
     {"memory": 8, "concurrency": 8},
-    {"memory": 8, "concurrency": 4},
-    {"memory": 16, "concurrency": 12},
-    {"memory": 32, "concurrency": 16},
-    {"memory": 24, "concurrency": 12},
-    {"memory": 64, "concurrency": 16},
-    {"memory": 16, "concurrency": 14},
-    {"memory": 8, "concurrency": 10},
-    {"memory": 32, "concurrency": 10},
-    {"memory": 24, "concurrency": 8},
 ]
 
 STRIPE_M_OUTER_VERSION = "m-outer-3437aaddcdf6922d623e172c2d6f9278"
-# payment_user_agent 中的 hash = js.stripe.com/v3 内 STRIPE_JS_BUILD_SALT 后的版本串（bp.h）
-DEFAULT_PAYMENT_USER_AGENT = "stripe.js/03270cb259; stripe-js-v3/03270cb259; payment-element"
+# payment_user_agent fallback（仅在动态获取全部失败时使用，正常情况不会命中）
+_PUA_FALLBACK = "stripe.js/ebbd885975; stripe-js-v3/ebbd885975; payment-element"
 # Stripe.js 运行页面（billing 页），用于 payload 的 url / referrer 字段
 STRIPE_PAGE_URL = "https://platform.claude.com/create/credits"
 STRIPE_PAGE_REFERRER = "https://platform.claude.com/"
@@ -180,26 +168,72 @@ class StripeDevice:
 class StripeFingerprint:
     """Stripe 设备指纹管理器。"""
 
-    def __init__(self, ua: str = ""):
+    def __init__(self, state_dir: str = "", ua: str = ""):
+        self._state_dir = state_dir
         self._ua = ua or (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/136.0.7103.100 Safari/537.36"
         )
-        self._payment_user_agent = DEFAULT_PAYMENT_USER_AGENT
+        self._devices_path = os.path.join(state_dir, "stripe_devices.json") if state_dir else ""
+        self._devices: dict = {}
+        self._payment_user_agent: Optional[str] = None  # 延迟初始化，首次使用时动态获取
+        if self._devices_path and os.path.isfile(self._devices_path):
+            try:
+                with open(self._devices_path) as f:
+                    self._devices = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                self._devices = {}
 
     @property
     def payment_user_agent(self) -> str:
-        return self._payment_user_agent
+        return self._payment_user_agent or _PUA_FALLBACK
 
     @payment_user_agent.setter
     def payment_user_agent(self, val: str):
         self._payment_user_agent = val
 
+    def ensure_payment_user_agent(self, session, proxies=None) -> str:
+        """确保 payment_user_agent 是最新的。首次调用时从 js.stripe.com/v3 动态获取。"""
+        if self._payment_user_agent:
+            return self._payment_user_agent
+        pua = self.fetch_payment_user_agent(session, proxies)
+        self._payment_user_agent = pua
+        return pua
+
     def get_device(self, session, proxy_key: str, proxies: Optional[dict] = None,
                    force_new: bool = False) -> StripeDevice:
-        """每次创建全新设备指纹，确保每个注册账号在 Stripe 看来都是不同设备。"""
+        """获取或创建设备指纹。
+
+        force_new=True（默认行为改为每次新注册都创建全新指纹）：
+        每次调用都生成新的 fingerprint seed → 新设备 → 新 guid/muid/sid。
+        这确保每个注册账号在 Stripe 看来都是不同的设备。
+        """
+        if not force_new:
+            existing = self._devices.get(proxy_key)
+            if existing and existing.get("guid") and existing.get("muid"):
+                device = StripeDevice(
+                    guid=existing["guid"],
+                    muid=existing["muid"],
+                    sid=existing.get("sid", ""),
+                    fingerprint_seed=existing.get("fingerprint_seed", proxy_key),
+                    created_at=existing.get("created_at", ""),
+                    last_used_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    use_count=existing.get("use_count", 0) + 1,
+                )
+                new_sid = self._refresh_sid(session, device, proxy_key, proxies)
+                if new_sid:
+                    device.sid = new_sid
+                self._persist(proxy_key, device)
+                log.info("[stripe_fp] 复用设备: proxy=%s, guid=%s..., use=%d",
+                         proxy_key, device.guid[:12], device.use_count)
+                return device
+
+        # 每次注册都生成全新设备（用随机 seed 确保指纹唯一）
         unique_seed = f"{proxy_key}_{int(time.time())}_{random.getrandbits(32)}"
         device = self._create_new_device(session, unique_seed, proxies)
+        # 用唯一 key 持久化（不覆盖旧的）
+        persist_key = f"{proxy_key}_{int(time.time())}"
+        self._persist(persist_key, device)
         log.info("[stripe_fp] 全新设备: guid=%s..., seed=%s",
                  device.guid[:12], unique_seed[:20])
         return device
@@ -248,6 +282,34 @@ class StripeFingerprint:
             last_used_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
             use_count=1,
         )
+
+    def _refresh_sid(self, session, device: StripeDevice, proxy_key: str,
+                     proxies: Optional[dict] = None) -> str:
+        """带已有 m cookie 再次调 m.stripe.com/6 来刷新 sid。"""
+        seed = device.fingerprint_seed or proxy_key
+        fp_payload = self._build_fingerprint_payload(seed)
+
+        try:
+            # 设置已有的 m cookie（复用设备时带上持久 muid，让 Stripe 认出同一设备）
+            session.cookies.set("m", device.guid, domain=".stripe.com")
+            r = session.post(
+                "https://m.stripe.com/6",
+                headers={
+                    "Content-Type": "text/plain;charset=UTF-8",
+                    "Origin": "https://m.stripe.network",
+                    "Referer": "https://m.stripe.network/",
+                    "User-Agent": self._ua,
+                },
+                data=fp_payload,
+                proxies=proxies,
+                timeout=10,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                return data.get("sid", "")
+        except Exception as e:
+            log.debug("[stripe_fp] sid 刷新失败: %s", e)
+        return ""
 
     def _build_fingerprint_payload(self, seed: str) -> str:
         """构建发给 m.stripe.com/6 的指纹 body（逆向 out-4.5.45.js 的真实格式）。
@@ -467,6 +529,18 @@ class StripeFingerprint:
         ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)  # color type 2 = RGB
         idat = zlib.compress(raw_rgb, 9)
         return sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b"")
+
+    def _persist(self, proxy_key: str, device: StripeDevice) -> None:
+        """持久化设备到 stripe_devices.json。"""
+        if not self._devices_path:
+            return
+        self._devices[proxy_key] = asdict(device)
+        try:
+            os.makedirs(os.path.dirname(self._devices_path), exist_ok=True)
+            with open(self._devices_path, "w") as f:
+                json.dump(self._devices, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            log.warning("[stripe_fp] 持久化失败: %s", e)
 
     @staticmethod
     def _fake_stripe_id() -> str:

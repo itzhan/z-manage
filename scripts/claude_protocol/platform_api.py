@@ -46,7 +46,7 @@ class PlatformAPI:
 
     def __init__(self, session, session_key: str = "", org_id: str = "",
                  proxies=None, build_sha: str = "", device_id: str = "",
-                 activity_session_id: str = "",
+                 activity_session_id: str = "", state_dir: str = "",
                  proxy_key: str = ""):
         self.session = session
         self.session_key = session_key
@@ -59,6 +59,7 @@ class PlatformAPI:
         self._anonymous_id = str(uuid.uuid4())
         self._proxy_key = proxy_key
         self._stripe_fp = StripeFingerprint(
+            state_dir=state_dir,
             ua=session.headers.get("User-Agent", ""),
         )
         self._stripe_device: Optional[StripeDevice] = None
@@ -465,9 +466,10 @@ class PlatformAPI:
             log.warning("[upgrade] prepaid/upgrade 失败: %s", e)
 
     def purchase_credits(self, amount_usd: float) -> dict:
-        """充值 credits。
+        """充值 credits 并验证到账。
 
         端点: POST /api/organizations/{org}/prepaid/credits
+        返回 200 不代表扣款成功——需要检查 stripe_invoice_id 和实际余额。
         """
         if not self.org_id:
             self._refresh_org_id()
@@ -490,10 +492,66 @@ class PlatformAPI:
             except Exception:
                 log.error("[purchase] %d: %s", r.status_code, r.text[:500])
         r.raise_for_status()
+
         try:
-            return r.json()
+            resp = r.json()
         except Exception:
-            return {"status": "ok", "status_code": r.status_code}
+            resp = {}
+
+        payment_status = resp.get("payment_status", "")
+        invoice_id = resp.get("stripe_invoice_id", "")
+        log.info("[purchase] payment_status=%s stripe_invoice_id=%s",
+                 payment_status, invoice_id or "(空)")
+
+        if payment_status in ("pending_invoice", "pending"):
+            log.info("[purchase] invoice pending，轮询等待 paid...")
+            paid = self._poll_invoice_paid(max_wait=90, interval=5)
+            if paid:
+                log.info("[purchase] invoice 已 paid，余额: $%.2f", self.get_balance())
+                resp["_verified"] = True
+                return resp
+            bal = self.get_balance()
+            if bal > 0:
+                log.info("[purchase] 余额已到账: $%.2f（invoice 状态可能延迟）", bal)
+                resp["_verified"] = True
+                return resp
+            log.error("[purchase] 90s 超时，invoice 未 paid，余额 $0 — 卡扣款可能失败")
+            raise RuntimeError(
+                f"充值未到账: payment_status={payment_status}, "
+                f"stripe_invoice_id={invoice_id or '空'} — 卡可能被发卡行拒绝"
+            )
+
+        return resp
+
+    def _poll_invoice_paid(self, max_wait: int = 90, interval: int = 5) -> bool:
+        """轮询 /api/organizations/{org}/invoices 直到最新 invoice 变为 paid。"""
+        if not self.org_id:
+            return False
+        for i in range(max_wait // interval):
+            time.sleep(interval)
+            try:
+                h = self._headers()
+                h.pop("Content-Type", None)
+                r = self.session.get(
+                    f"{PLATFORM_BASE}/api/organizations/{self.org_id}/invoices",
+                    headers=h, proxies=self.proxies, timeout=15,
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    invoices = data.get("invoices", [])
+                    if invoices:
+                        latest = invoices[0]
+                        status = latest.get("invoice_status", "")
+                        log.info("[purchase] 轮询 [%ds] invoice_status=%s",
+                                 (i + 1) * interval, status)
+                        if status == "paid":
+                            return True
+                        if status in ("void", "uncollectible", "failed"):
+                            log.error("[purchase] invoice 终态: %s", status)
+                            return False
+            except Exception as e:
+                log.debug("[purchase] 轮询异常: %s", e)
+        return False
 
     STRIPE_HCAPTCHA_SITEKEY = "463b917e-e264-403f-ad34-34af0ee10294"
     STRIPE_HCAPTCHA_URL = "https://js.stripe.com"
@@ -540,9 +598,10 @@ class PlatformAPI:
         exp_month = int(exp[:2])
         exp_year = int("20" + exp[2:]) if len(exp) == 4 else int(exp[2:])
 
-        # 0. 预热 Stripe 设备指纹 + 并行求解 hCaptcha
+        # 0. 预热 Stripe 设备指纹 + 动态获取 Stripe.js 版本 + 求解 hCaptcha
         log.info("[绑卡 0/4] 预热 Stripe 设备指纹 + 求解 hCaptcha...")
         self._ensure_stripe_device()
+        self._stripe_fp.ensure_payment_user_agent(self.session, self.proxies)
 
         hcaptcha_token = ""
         if yescaptcha_key:
@@ -674,16 +733,20 @@ class PlatformAPI:
         """查询当前 credits 余额（单位: USD）。
 
         端点: GET /api/organizations/{org}/prepaid/credits
+        响应: {"amount":500,"currency":"USD","balance_credits":5,...}
+          amount = 美分, balance_credits = 美元
         """
         if not self.org_id:
             self._refresh_org_id()
         try:
             data = self._get(f"/api/organizations/{self.org_id}/prepaid/credits")
-            # 余额可能以分为单位返回
-            balance_cents = data.get("remaining_cents") or data.get("balance") or 0
-            if balance_cents > 100:
-                return float(balance_cents) / 100.0
-            return float(balance_cents)
+            bc = data.get("balance_credits")
+            if bc is not None:
+                return float(bc)
+            amount = data.get("amount") or 0
+            if amount:
+                return float(amount) / 100.0
+            return 0.0
         except Exception:
             return 0.0
 

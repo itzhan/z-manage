@@ -111,31 +111,22 @@ class PlatformLogin:
             "utc_offset": utc_offset,
         }
 
-        import time as _time
-        for _send_attempt in range(4):
-            r = self.session.post(
-                f"{PLATFORM_BASE}/api/auth/send_magic_link",
-                headers=self._anthropic_headers("/login"),
-                data=json.dumps(send_body),
-                proxies=self.proxies, timeout=30,
-            )
-            log.info("  send_magic_link: %d", r.status_code)
+        r = self.session.post(
+            f"{PLATFORM_BASE}/api/auth/send_magic_link",
+            headers=self._anthropic_headers("/login"),
+            data=json.dumps(send_body),
+            proxies=self.proxies, timeout=30,
+        )
+        log.info("  send_magic_link: %d", r.status_code)
 
-            if r.status_code == 429:
-                wait = min(15 * (2 ** _send_attempt), 120)
-                log.warning("  send_magic_link 429 限流，等待 %ds...", wait)
-                _time.sleep(wait)
-                continue
-
-            if r.status_code >= 400:
-                error_msg = ""
-                try:
-                    err_data = r.json()
-                    error_msg = err_data.get("error", {}).get("message", "")
-                except Exception:
-                    error_msg = r.text[:300]
-                raise RuntimeError(f"提交邮箱失败: {r.status_code} {error_msg}")
-            break
+        if r.status_code >= 400:
+            error_msg = ""
+            try:
+                err_data = r.json()
+                error_msg = err_data.get("error", {}).get("message", "")
+            except Exception:
+                error_msg = r.text[:300]
+            raise RuntimeError(f"提交邮箱失败: {r.status_code} {error_msg}")
 
         try:
             resp_data = r.json()
@@ -152,34 +143,9 @@ class PlatformLogin:
             raise RuntimeError("magic link 获取超时")
         log.info("  获取到 magic link: %s...", magic_link[:60])
 
-        # ---- 4. 验证 magic link（429 指数退避重试，already_used 重发邮件）----
-        import time as _time
-        for _verify_attempt in range(5):
-            log.info("4/4 验证 magic link token (attempt %d)", _verify_attempt + 1)
-            try:
-                return self._verify_magic_link(magic_link, email)
-            except RuntimeError as e:
-                err_str = str(e)
-                if "429" in err_str or "rate limit" in err_str.lower():
-                    wait = min(10 * (2 ** _verify_attempt), 120)
-                    log.warning("  429 限流，等待 %ds 后重试...", wait)
-                    _time.sleep(wait)
-                    continue
-                if "already_used" in err_str and _verify_attempt < 4:
-                    log.warning("  magic link 已使用，重新发送...")
-                    self.session.post(
-                        f"{PLATFORM_BASE}/api/auth/send_magic_link",
-                        headers=self._anthropic_headers("/login"),
-                        data=json.dumps({"email_address": email, "source": "console", "utc_offset": utc_offset}),
-                        proxies=self.proxies, timeout=30,
-                    )
-                    _time.sleep(8)
-                    magic_link = get_magic_link()
-                    if not magic_link:
-                        raise RuntimeError("magic link 重新获取超时")
-                    log.info("  新 magic link: %s...", magic_link[:60])
-                    continue
-                raise
+        # ---- 4. 验证 magic link token → 获取 session ----
+        log.info("4/4 验证 magic link token")
+        return self._verify_magic_link(magic_link, email)
 
     def _extract_initial_state(self, response) -> None:
         """从登录页响应中提取 cookie 和 build SHA。"""

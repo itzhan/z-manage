@@ -29,21 +29,6 @@ CHROME_PROFILES = [
         "sec_ch_ua": '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
         "build": 7103, "patch_range": (48, 175),
     },
-    {
-        "impersonate": "chrome131",
-        "sec_ch_ua": '"Chromium";v="131", "Google Chrome";v="131", "Not_A Brand";v="24"',
-        "build": 6778, "patch_range": (100, 230),
-    },
-    {
-        "impersonate": "chrome133a",
-        "sec_ch_ua": '"Chromium";v="133", "Google Chrome";v="133", "Not(A:Brand";v="99"',
-        "build": 6943, "patch_range": (80, 200),
-    },
-    {
-        "impersonate": "chrome136",
-        "sec_ch_ua": '"Google Chrome";v="136", "Chromium";v="136", "Not.A/Brand";v="99"',
-        "build": 7103, "patch_range": (100, 220),
-    },
 ]
 
 PLATFORM_ORIGINS = [

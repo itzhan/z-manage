@@ -409,68 +409,29 @@ class OutlookClient:
 # =====================================================================
 
 def poll_magic_link_mailcom(email: str, password: str,
-                            max_wait: int = 120, interval: int = 5,
-                            after_ts: float = 0,
-                            master_url: str = "", master_api_key: str = "") -> str:
-    """轮询获取 Claude magic link。优先走 z-manage API，失败回退直连 mail.com。"""
-    if after_ts <= 0:
-        after_ts = time.time() - 10
-    import logging
-    log = logging.getLogger(__name__)
-
+                            max_wait: int = 120, interval: int = 5) -> str:
+    """轮询 mail.com 收件箱获取 Claude magic link。"""
+    mc = MailComClient(email, password)
     for attempt in range(max_wait // interval):
         try:
-            # 优先走 z-manage API（已缓存 token，不触发 mail.com 风控）
-            if master_url and master_api_key:
-                import urllib.request
-                url = f"{master_url}/api/mailcom/inbox?email={urllib.parse.quote(email)}"
-                req = urllib.request.Request(url, headers={"X-API-Key": master_api_key})
-                resp = json.loads(urllib.request.urlopen(req, timeout=20).read())
-                for m in resp.get("mails", []):
-                    subj = m.get("subject", "")
-                    from_addr = m.get("from", "")
-                    if "anthropic" not in from_addr.lower() and "claude" not in subj.lower():
-                        continue
-                    mail_id = m.get("id", "")
-                    if not mail_id:
-                        continue
-                    url2 = f"{master_url}/api/mailcom/inbox?email={urllib.parse.quote(email)}&mailId={urllib.parse.quote(mail_id)}"
-                    req2 = urllib.request.Request(url2, headers={"X-API-Key": master_api_key})
-                    body = json.loads(urllib.request.urlopen(req2, timeout=20).read()).get("body", "")
-                    link = MAGIC_LINK_RE.search(body)
-                    if link:
-                        return link.group(0)
-            else:
-                # 回退：直连 mail.com OAuth
-                mc = MailComClient(email, password)
-                mc.login()
-                mails = mc.list_incoming(10)
-                for m in mails[:10]:
-                    mail_ts = m.date / 1000 if m.date > 1e12 else m.date
-                    if mail_ts < after_ts:
-                        continue
-                    if "anthropic" not in m.from_addr.lower() and "claude" not in m.subject.lower():
-                        continue
-                    body = mc.get_body(m.id)
-                    link = MAGIC_LINK_RE.search(body)
-                    if link:
-                        return link.group(0)
+            mc.login()
+            mails = mc.list_incoming(10)
+            for m in mails[:5]:
+                body = mc.get_body(m.id)
+                link = MAGIC_LINK_RE.search(body)
+                if link:
+                    return link.group(0)
         except Exception as e:
             if attempt < 3:
-                log.warning("[mail] 读邮件异常（重试 %d）: %s", attempt + 1, e)
+                print(f"[mail] mail.com 登录/读信异常（重试 {attempt + 1}）: {e}")
         time.sleep(interval if attempt > 2 else 8)
     return ""
 
 
 def poll_magic_link_outlook(client_id: str, refresh_token: str,
-                            max_wait: int = 120, interval: int = 5,
-                            after_ts: float = 0) -> str:
+                            max_wait: int = 120, interval: int = 5) -> str:
     """轮询 Outlook 收件箱获取 Claude magic link。"""
-    if after_ts <= 0:
-        after_ts = time.time() - 10
     oc = OutlookClient(client_id, refresh_token)
-    import logging
-    log = logging.getLogger(__name__)
     for attempt in range(max_wait // interval):
         try:
             link = oc.find_magic_link()
@@ -478,6 +439,6 @@ def poll_magic_link_outlook(client_id: str, refresh_token: str,
                 return link
         except Exception as e:
             if attempt < 3:
-                log.warning("[mail] Outlook 读邮件异常（重试 %d）: %s", attempt + 1, e)
+                print(f"[mail] Outlook 读邮件异常（重试 {attempt + 1}）: {e}")
         time.sleep(interval if attempt > 2 else 8)
     return ""
