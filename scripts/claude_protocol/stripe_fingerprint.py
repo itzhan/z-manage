@@ -71,29 +71,33 @@ SCREEN_PROFILES = [
     {"resolution": "2560,1600", "available": "2560,1505", "colorDepth": 30, "pixelRatio": 2},
     {"resolution": "1728,1117", "available": "1728,1055", "colorDepth": 30, "pixelRatio": 2},
     {"resolution": "1512,982", "available": "1512,918", "colorDepth": 30, "pixelRatio": 2},
+    {"resolution": "1440,900", "available": "1440,831", "colorDepth": 24, "pixelRatio": 2},
+    {"resolution": "1680,1050", "available": "1680,981", "colorDepth": 24, "pixelRatio": 2},
+    {"resolution": "2880,1800", "available": "2880,1705", "colorDepth": 30, "pixelRatio": 2},
+    {"resolution": "3024,1964", "available": "3024,1895", "colorDepth": 30, "pixelRatio": 2},
+    {"resolution": "3456,2234", "available": "3456,2169", "colorDepth": 30, "pixelRatio": 2},
+    {"resolution": "1792,1120", "available": "1792,1055", "colorDepth": 30, "pixelRatio": 2},
+    {"resolution": "2048,1152", "available": "2048,1083", "colorDepth": 24, "pixelRatio": 2},
+    {"resolution": "1470,956", "available": "1470,893", "colorDepth": 30, "pixelRatio": 2},
+    {"resolution": "1800,1169", "available": "1800,1105", "colorDepth": 30, "pixelRatio": 2},
+    {"resolution": "2056,1329", "available": "2056,1265", "colorDepth": 30, "pixelRatio": 2},
 ]
 
 GPU_PROFILES = [
-    {
-        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version)",
-        "vendor": "Google Inc. (Apple)",
-    },
-    {
-        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)",
-        "vendor": "Google Inc. (Apple)",
-    },
-    {
-        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)",
-        "vendor": "Google Inc. (Apple)",
-    },
-    {
-        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
-        "vendor": "Google Inc. (Apple)",
-    },
-    {
-        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)",
-        "vendor": "Google Inc. (Apple)",
-    },
+    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
+    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
+    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
+    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
+    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
+    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
+    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
+    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
+    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
+    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Max, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
+    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Max, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
+    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Max, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
+    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Ultra, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
+    {"renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Ultra, Unspecified Version)", "vendor": "Google Inc. (Apple)"},
 ]
 
 # out-4.5.45.js 内的 fontsToDetect 顺序（55 项），FontsExtractor 输出为每项
@@ -138,6 +142,15 @@ HARDWARE_PROFILES = [
     {"memory": 16, "concurrency": 8},
     {"memory": 32, "concurrency": 12},
     {"memory": 8, "concurrency": 8},
+    {"memory": 8, "concurrency": 4},
+    {"memory": 16, "concurrency": 12},
+    {"memory": 32, "concurrency": 16},
+    {"memory": 24, "concurrency": 12},
+    {"memory": 64, "concurrency": 16},
+    {"memory": 16, "concurrency": 14},
+    {"memory": 8, "concurrency": 10},
+    {"memory": 32, "concurrency": 10},
+    {"memory": 24, "concurrency": 8},
 ]
 
 STRIPE_M_OUTER_VERSION = "m-outer-3437aaddcdf6922d623e172c2d6f9278"
